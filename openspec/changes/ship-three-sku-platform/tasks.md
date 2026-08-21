@@ -32,4 +32,4 @@
 ## 5. Workspace and GitHub
 
 - [x] 5.1 Root README, gitignore, npm test
-- [ ] 5.2 Push three product repositories to icohangar-ops
+- [x] 5.2 Push three product repositories to icohangar-ops

@@ -1,0 +1,22 @@
+{
+  "name": "cubiczan-agent-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Governed MCP Gateway, Agent Spend & Mandate Plane, and Auditable CFO Agent Mesh",
+  "workspaces": [
+    "packages/shared",
+    "packages/governed-mcp-gateway",
+    "packages/spend-mandate-plane",
+    "packages/cfo-agent-mesh"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "gateway": "npm start -w @cubiczan/governed-mcp-gateway",
+    "spend": "npm start -w @cubiczan/spend-mandate-plane",
+    "cfo": "npm start -w @cubiczan/cfo-agent-mesh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

@@ -13,7 +13,8 @@
     "test": "npm test --workspaces --if-present",
     "gateway": "npm start -w @cubiczan/governed-mcp-gateway",
     "spend": "npm start -w @cubiczan/spend-mandate-plane",
-    "cfo": "npm start -w @cubiczan/cfo-agent-mesh"
+    "cfo": "npm start -w @cubiczan/cfo-agent-mesh",
+    "shots": "node --import tsx scripts/capture-live.ts && python3 scripts/render-readme-shots.py"
   },
   "engines": {
     "node": ">=20"

@@ -8,7 +8,7 @@ Three SKUs, one workspace. MCP clients keep a Bearer principal through `tools/ca
 
 | SKU | Port | Repo | Job |
 |---|---|---|---|
-| [Governed MCP Gateway](packages/governed-mcp-gateway) | `:7474` | [icohangar-ops/governed-mcp-gateway](https://github.com/icohangar-ops/governed-mcp-gateway) | Principal on every tool call and SSE frame. Vaulted credential rotation. Tool allowlists. |
+| [Governed MCP Gateway](packages/governed-mcp-gateway) | `:7474` | [icohangar-ops/governed-mcp-gateway](https://github.com/icohangar-ops/governed-mcp-gateway) | Fail-closed Bearer auth. Principal on every tool call and SSE frame. Signed authz decisions. Vaulted credential rotation. |
 | [Agent Spend & Mandate Plane](packages/spend-mandate-plane) | `:7475` | [icohangar-ops/spend-mandate-plane](https://github.com/icohangar-ops/spend-mandate-plane) | Propose → mandate → countersign → settle. Stripe by default; x402 is a rail. |
 | [Auditable CFO Agent Mesh](packages/cfo-agent-mesh) | `:7476` | [icohangar-ops/cfo-agent-mesh](https://github.com/icohangar-ops/cfo-agent-mesh) | Claim → agent → lock → document. ASC 842 / 606 / 718 engines. HMAC-chained evidence pack. |
 
@@ -46,7 +46,7 @@ npm run shots
 
 ## 1. Governed MCP Gateway
 
-Production MCP drops identity. `listTools` runs on the request thread; `tools/call` and SSE run somewhere else. This gateway resolves a Bearer credential to a **Principal**, injects it on every JSON-RPC call, and repeats it on **every SSE frame**. Named vault inputs rotate in place — `github_token` stays `github_token`.
+Production MCP drops identity. `listTools` runs on the request thread; `tools/call` and SSE run somewhere else. This gateway fail-closes on a bad Bearer, re-resolves the **Principal** on every `tools/list` and `tools/call` (no session JWT), injects principal + grants on `_meta`, and repeats identity on **every SSE frame**. Named vault inputs rotate in place — `github_token` stays `github_token`. Allowlist ∩ token scope is enforced twice; allow/deny is an HMAC-chained `authz.decision`.
 
 ![Principal injected on tools/call](docs/screenshots/gateway-principal.png)
 

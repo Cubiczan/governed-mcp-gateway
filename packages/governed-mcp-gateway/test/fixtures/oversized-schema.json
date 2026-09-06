@@ -4,8 +4,8 @@
   "server": "synthetic.oversized",
   "pack": "bloat",
   "expansion": {
-    "propertyCount": 72,
-    "enumSize": 18,
-    "descriptionPad": 180
+    "propertyCount": 220,
+    "enumSize": 20,
+    "descriptionPad": 220
   }
 }

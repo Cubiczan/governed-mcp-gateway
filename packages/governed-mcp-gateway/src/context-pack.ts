@@ -53,7 +53,14 @@ export class ContextPackStore {
     return created;
   }
 
-  ensure(sessionId: string, principalId: string, allowlist: string[], catalog: Iterable<CatalogTool>): SessionPack {
+  ensure(sessionId: string, principalId: string, allowlist: string[], catalog: readonly CatalogTool[]): SessionPack {
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      if (existing.principalId !== principalId) {
+        throw Object.assign(new Error("session belongs to another principal"), { code: "session_mismatch" });
+      }
+      return existing;
+    }
     return this.getOrCreate(sessionId, principalId, defaultSeedTools(allowlist, catalog));
   }
 
@@ -61,7 +68,7 @@ export class ContextPackStore {
     sessionId: string,
     principalId: string,
     allowlist: string[],
-    catalog: Iterable<CatalogTool>,
+    catalog: readonly CatalogTool[],
     request: { tools?: string[]; pack?: string },
   ): AdmitResult {
     const session = this.ensure(sessionId, principalId, allowlist, catalog);
@@ -73,6 +80,7 @@ export class ContextPackStore {
     const admitted: string[] = [];
     const denied: string[] = [];
     const have = new Set(session.tools);
+    const known = new Set(catalog.map((tool) => tool.name));
 
     for (const name of wanted) {
       if (have.has(name)) {
@@ -83,8 +91,7 @@ export class ContextPackStore {
         denied.push(name);
         continue;
       }
-      const exists = [...catalog].some((tool) => tool.name === name);
-      if (!exists && !isMetaTool(name)) {
+      if (!known.has(name) && !isMetaTool(name)) {
         denied.push(name);
         continue;
       }

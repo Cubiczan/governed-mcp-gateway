@@ -71,6 +71,13 @@ const objectSchema = (properties: Record<string, Json>, required: string[] = [])
   ...(required.length ? { required } : {}),
 });
 
+let cachedOversized: CatalogTool | undefined;
+
+function oversizedCatalogTool(): CatalogTool {
+  cachedOversized ??= buildOversizedCatalogTool();
+  return cachedOversized;
+}
+
 export function builtInCatalog(): CatalogTool[] {
   return [
     {
@@ -123,7 +130,7 @@ export function builtInCatalog(): CatalogTool[] {
         pack: { type: "string", description: "Named pack to admit (intersected with the allowlist)." },
       }),
     },
-    buildOversizedCatalogTool(),
+    oversizedCatalogTool(),
   ];
 }
 

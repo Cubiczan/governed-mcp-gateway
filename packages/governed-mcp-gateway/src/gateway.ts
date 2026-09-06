@@ -68,6 +68,7 @@ export interface ContextTaxReport {
     packs: PackTax[];
     tools: ToolTax[];
     ratioMaxMin: number;
+    ratioMaxMinTools: number;
     flagged: string[];
   };
   session?: {
@@ -309,13 +310,15 @@ export class GovernedGateway {
       packs,
       tools,
       ratioMaxMin: maxMinRatio(servers.map((s) => s.tokens)),
+      ratioMaxMinTools: maxMinRatio(tools.map((t) => t.tokens)),
       flagged,
     };
   }
 
   contextTaxReport(principal: Principal, sessionId?: string): ContextTaxReport {
     const sid = sessionId ?? `ses_${principal.id}`;
-    const session = this.packs.ensure(sid, principal.id, this.allowlistOf(principal), this.catalog.values());
+    const catalog = [...this.catalog.values()];
+    const session = this.packs.ensure(sid, principal.id, this.allowlistOf(principal), catalog);
     const taxes = session.tools
       .map((name) => this.toolTax(name))
       .filter((tax): tax is ToolTax => Boolean(tax));
@@ -366,7 +369,13 @@ export class GovernedGateway {
     sessionId: string,
     request: { tools?: string[]; pack?: string },
   ): AdmitResult {
-    const result = this.packs.admit(sessionId, principal.id, this.allowlistOf(principal), this.catalog.values(), request);
+    const result = this.packs.admit(
+      sessionId,
+      principal.id,
+      this.allowlistOf(principal),
+      [...this.catalog.values()],
+      request,
+    );
     if (result.admitted.length > 0) {
       this.ledger.append({
         event: "schema.pack.opened",
@@ -391,7 +400,8 @@ export class GovernedGateway {
     _meta: { cubiczan: { principal: Principal; sessionId: string; tax: ListTax } };
   } {
     const sessionId = this.sessionIdFor(principal, params, req);
-    const session = this.packs.ensure(sessionId, principal.id, this.allowlistOf(principal), this.catalog.values());
+    const catalog = [...this.catalog.values()];
+    const session = this.packs.ensure(sessionId, principal.id, this.allowlistOf(principal), catalog);
     const need = asStringArray(params.need);
     const pack = typeof params.pack === "string" ? params.pack : undefined;
     if (need.length > 0 || pack) this.admitNeed(principal, sessionId, { tools: need, pack });

@@ -59,6 +59,22 @@ export interface GatewayOptions {
   taxThresholds?: Partial<TaxThresholds>;
 }
 
+export interface JsonRpcError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
+export interface JsonRpcResponse {
+  jsonrpc: "2.0";
+  id: Json;
+  result?: unknown;
+  error?: JsonRpcError;
+}
+
+export const MCP_INSTRUCTIONS =
+  "Governed MCP Gateway. Every tools/call carries params._meta.cubiczan.principal from the authenticated credential. Default tools/list is the session pack (echo.ping plus catalog meta-tools context.inspect and context.need), not the full allowlist. Call context.inspect to read schema token tax; call context.need to admit allowlisted tools (pack=payments for stripe.charge). Disallowed tools return JSON-RPC -32001 and do not run. Stdio uses the seeded PayOps demo principal unless GATEWAY_AGENT_KEY is set.";
+
 export interface ContextTaxReport {
   heuristic: { bytesPerToken: number };
   thresholds: TaxThresholds;
@@ -248,11 +264,21 @@ export class GovernedGateway {
   }
 
   resolvePrincipal(req: http.IncomingMessage): Principal | undefined {
-    const token = bearer(req);
+    return this.principalForToken(bearer(req));
+  }
+
+  principalForToken(token: string | undefined): Principal | undefined {
     if (!token) return undefined;
     const id = this.keys.get(hash(token));
     if (!id) return undefined;
     return this.agents.get(id)?.principal;
+  }
+
+  stdioPrincipal(): Principal {
+    const token = process.env.GATEWAY_AGENT_KEY ?? "mcp_agt_payops_demo";
+    const principal = this.principalForToken(token);
+    if (!principal) throw new Error("stdio principal is not seeded; call seedDemo() first");
+    return principal;
   }
 
   attachPrincipal(payload: Record<string, Json>, principal: Principal): Record<string, Json> {
@@ -556,6 +582,72 @@ export class GovernedGateway {
     return result;
   }
 
+  initializeResult(): Record<string, Json> {
+    return {
+      protocolVersion: "2025-03-26",
+      serverInfo: {
+        name: "governed-mcp-gateway",
+        version: "0.1.0",
+        title: "Governed MCP Gateway",
+        websiteUrl: "https://github.com/Cubiczan/governed-mcp-gateway",
+      },
+      capabilities: { tools: { listChanged: false }, logging: {} },
+      instructions: MCP_INSTRUCTIONS,
+    };
+  }
+
+  async handleJsonRpc(
+    principal: Principal,
+    obj: Record<string, Json>,
+    req?: http.IncomingMessage,
+  ): Promise<JsonRpcResponse | undefined> {
+    const method = String(obj.method ?? "");
+    const id = (Object.prototype.hasOwnProperty.call(obj, "id") ? obj.id : null) ?? null;
+    if (method.startsWith("notifications/")) return undefined;
+
+    if (method === "initialize") {
+      return { jsonrpc: "2.0", id, result: this.initializeResult() };
+    }
+    if (method === "ping") {
+      return { jsonrpc: "2.0", id, result: {} };
+    }
+    if (method === "tools/list") {
+      return { jsonrpc: "2.0", id, result: this.listTools(principal, asObject(obj.params), req) };
+    }
+    if (method === "resources/list") {
+      return { jsonrpc: "2.0", id, result: { resources: [] } };
+    }
+    if (method === "prompts/list") {
+      return { jsonrpc: "2.0", id, result: { prompts: [] } };
+    }
+    if (method === "tools/call") {
+      const attached = this.attachPrincipal(obj, principal);
+      const params = asObject(attached.params);
+      const name = String(params.name ?? "");
+      const args = asObject(params.arguments);
+      try {
+        const result = await this.dispatchTool(principal, name, args);
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(result) }],
+            _meta: { cubiczan: { principal } },
+            structuredContent: result,
+          },
+        };
+      } catch (error) {
+        const rpc = (error as { rpc?: JsonRpcError }).rpc;
+        return {
+          jsonrpc: "2.0",
+          id,
+          error: rpc ?? { code: -32000, message: error instanceof Error ? error.message : String(error) },
+        };
+      }
+    }
+    return { jsonrpc: "2.0", id, error: { code: -32601, message: `unknown method ${method}` } };
+  }
+
   createHttpServer(): http.Server {
     return createServer(async (req, res, url, body) => {
       if (req.method === "GET" && url.pathname === "/health") {
@@ -673,59 +765,8 @@ export class GovernedGateway {
           sendJson(res, 401, { error: "unauthorized" });
           return;
         }
-        const method = String(obj.method ?? "");
-        const id = obj.id ?? null;
-        if (method === "initialize") {
-          sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: "2025-03-26",
-              serverInfo: { name: "governed-mcp-gateway", version: "0.1.0" },
-              capabilities: { tools: {}, logging: {} },
-            },
-          });
-          return;
-        }
-        if (method === "tools/list") {
-          sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id,
-            result: this.listTools(principal, asObject(obj.params), req),
-          });
-          return;
-        }
-        if (method === "tools/call") {
-          const attached = this.attachPrincipal(obj, principal);
-          const params = asObject(attached.params);
-          const name = String(params.name ?? "");
-          const args = asObject(params.arguments);
-          try {
-            const result = await this.dispatchTool(principal, name, args);
-            sendJson(res, 200, {
-              jsonrpc: "2.0",
-              id,
-              result: {
-                content: [{ type: "text", text: JSON.stringify(result) }],
-                _meta: { cubiczan: { principal } },
-                structuredContent: result,
-              },
-            });
-          } catch (error) {
-            const rpc = (error as { rpc?: { code: number; message: string; data?: unknown } }).rpc;
-            sendJson(res, 200, {
-              jsonrpc: "2.0",
-              id,
-              error: rpc ?? { code: -32000, message: error instanceof Error ? error.message : String(error) },
-            });
-          }
-          return;
-        }
-        sendJson(res, 200, {
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32601, message: `unknown method ${method}` },
-        });
+        const rpc = await this.handleJsonRpc(principal, obj, req);
+        sendJson(res, 200, rpc ?? { jsonrpc: "2.0", id: null, result: {} });
         return;
       }
 

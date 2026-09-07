@@ -1,5 +1,7 @@
 # Governed MCP Gateway
 
+[![Cubiczan/governed-mcp-gateway MCP server — quality and maintenance score on Glama](https://glama.ai/mcp/servers/Cubiczan/governed-mcp-gateway/badges/score.svg)](https://glama.ai/mcp/servers/Cubiczan/governed-mcp-gateway)
+
 Port **7474**. Principal on every `tools/call` and every SSE frame.
 
 Production MCP is stuck on auth. `SecurityContextHolder` / ThreadLocal dies when the tool runs on an SSE worker. VS Code secrets are keyed by `inputs[].id`, so rotating a token by renaming the input leaves the old secret alive. This SKU is a **control plane**, not a server catalog.
@@ -33,6 +35,14 @@ npm install
 npm test -w @cubiczan/governed-mcp-gateway
 npm run gateway
 ```
+
+Stdio MCP (Glama / `npx`; Content-Length JSON-RPC, no HTTP port):
+
+```bash
+npm run mcp
+```
+
+Glama claim/build/release steps: [docs/glama-release.md](../../docs/glama-release.md).
 
 Or in this package:
 
@@ -142,7 +152,7 @@ packages/governed-mcp-gateway/src/context-pack.ts  session packs, allow-by-need
 packages/shared                                    CHP gate, HMAC ledger, SSE helper
 ```
 
-Sister SKUs: [spend-mandate-plane](https://github.com/icohangar-ops/spend-mandate-plane) (`:7475`), [cfo-agent-mesh](https://github.com/icohangar-ops/cfo-agent-mesh) (`:7476`).
+Sister SKUs in this workspace: [spend-mandate-plane](../spend-mandate-plane) (`:7475`), [cfo-agent-mesh](../cfo-agent-mesh) (`:7476`). Listing: [Cubiczan/governed-mcp-gateway](https://github.com/Cubiczan/governed-mcp-gateway).
 
 ## License
 

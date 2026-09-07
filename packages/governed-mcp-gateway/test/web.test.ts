@@ -173,3 +173,42 @@ test("vercel.json and api/index.mjs follow Fluid Compute shape without a hostnam
   assert.doesNotMatch(readRepo("vercel.json"), /\.vercel\.app/);
   assert.doesNotMatch(readRepo("README.md"), /\.vercel\.app/);
 });
+
+test("Fluid fetch entry serves /health and Bearer initialize", async () => {
+  resetSeededWebGateway();
+  const mod = (await import(join(repoRoot(), "api/index.mjs"))) as {
+    default: { fetch: (request: Request) => Promise<Response> };
+  };
+  const health = await mod.default.fetch(new Request("http://127.0.0.1/health"));
+  assert.equal(health.status, 200);
+  const healthJson = (await health.json()) as { ok?: boolean; mode?: string };
+  assert.equal(healthJson.ok, true);
+  assert.equal(healthJson.mode, "stateless");
+
+  const denied = await mod.default.fetch(
+    new Request("http://127.0.0.1/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+    }),
+  );
+  assert.equal(denied.status, 401);
+
+  const init = await mod.default.fetch(
+    new Request("http://127.0.0.1/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer mcp_agt_payops_demo",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "initialize",
+        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "fluid", version: "0" } },
+      }),
+    }),
+  );
+  assert.equal(init.status, 200);
+  assert.equal(init.headers.get("mcp-session-id"), null);
+});

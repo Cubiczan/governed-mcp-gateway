@@ -1,7 +1,8 @@
 /**
  * Stdio MCP transport for Glama / npx.
  *
- * Speaks JSON-RPC with MCP Content-Length framing on stdin/stdout.
+ * Writes newline-delimited JSON on stdout (Glama mcp-proxy@6.4.3 and later).
+ * Reads both NDJSON and legacy MCP Content-Length framing on stdin.
  * HTTP control-plane remains `src/server.ts` (`npm start` / `npm run gateway`).
  * Process entry is `src/mcp.ts` so this module can be imported by tests.
  * Do not write logs to stdout — stdout is the protocol.
@@ -10,9 +11,7 @@ import type { Json } from "@cubiczan/shared";
 import { GovernedGateway } from "./gateway.ts";
 
 export function writeMcpMessage(stream: NodeJS.WritableStream, message: unknown): void {
-  const body = Buffer.from(JSON.stringify(message), "utf8");
-  stream.write(`Content-Length: ${body.length}\r\n\r\n`);
-  stream.write(body);
+  stream.write(`${JSON.stringify(message)}\n`);
 }
 
 export function tryReadMcpMessage(buffer: Buffer): { value: Record<string, Json>; rest: Buffer } | undefined {

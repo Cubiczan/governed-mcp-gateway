@@ -36,7 +36,7 @@ npm test -w @cubiczan/governed-mcp-gateway
 npm run gateway
 ```
 
-Stdio MCP (Glama / `npx`; Content-Length JSON-RPC, no HTTP port):
+Stdio MCP (Glama / `npx`; NDJSON JSON-RPC on stdout, no HTTP port):
 
 ```bash
 npm run mcp

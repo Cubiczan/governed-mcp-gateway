@@ -48,7 +48,7 @@ Authenticate on Glama with GitHub as **`icohangar-ops`** (the username in `glama
    | Pinned commit SHA | **empty** (HEAD after Sync) |
 
 3. If the UI has a Dockerfile text field instead, paste the repo [`Dockerfile`](../Dockerfile).
-4. Click **Build** (some UIs label this **Deploy**). Wait until the build test is green. The child must speak MCP stdio; `mcp-proxy` wraps CMD as `["mcp-proxy","--","node","--import","tsx","packages/governed-mcp-gateway/src/mcp.ts"]`.
+4. Click **Build** (some UIs label this **Deploy**). Wait until the build test is green. The child must speak MCP stdio as **NDJSON on stdout**; `mcp-proxy` wraps CMD as `["mcp-proxy","--","node","--import","tsx","packages/governed-mcp-gateway/src/mcp.ts"]`. Content-Length framing is legacy stdin only — do not emit it on stdout.
 
 Do **not** point CMD at `src/server.ts`. That process is HTTP on `127.0.0.1:7474` and will fail introspection.
 
@@ -68,4 +68,4 @@ npm ci
 node --import tsx packages/governed-mcp-gateway/src/mcp.ts
 ```
 
-Stdio is Content-Length JSON-RPC. `npm start` / `npm run gateway` still serve HTTP `:7474`.
+Stdio stdout is **NDJSON** (`JSON.stringify(message)` plus a newline). Glama `mcp-proxy@6.4.3` parses newline-delimited JSON and **ignores** `Content-Length` header lines, which previously caused initialize timeouts. Stdin still accepts both NDJSON and legacy Content-Length framing. `npm start` / `npm run gateway` still serve HTTP `:7474`.

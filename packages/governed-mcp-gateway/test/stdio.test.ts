@@ -23,6 +23,39 @@ function readAllFramed(buffer: Buffer): Array<Record<string, unknown>> {
   return messages;
 }
 
+function writeContentLengthMessage(stream: NodeJS.WritableStream, message: unknown): void {
+  const body = Buffer.from(JSON.stringify(message), "utf8");
+  stream.write(`Content-Length: ${body.length}\r\n\r\n`);
+  stream.write(body);
+}
+
+test("writeMcpMessage emits NDJSON without Content-Length", () => {
+  const stdout = new PassThrough();
+  const chunks: Buffer[] = [];
+  stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+  const message = { jsonrpc: "2.0", id: 0, result: { ok: true } };
+  writeMcpMessage(stdout, message);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  assert.equal(raw, `${JSON.stringify(message)}\n`);
+  assert.ok(!raw.includes("Content-Length"));
+  assert.deepEqual(JSON.parse(raw.trim()), message);
+});
+
+test("tryReadMcpMessage accepts Content-Length and NDJSON on input", () => {
+  const framed = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
+  const ndjson = { jsonrpc: "2.0", id: 2, method: "tools/list" };
+  const body = Buffer.from(JSON.stringify(framed), "utf8");
+  const buffer = Buffer.concat([
+    Buffer.from(`Content-Length: ${body.length}\r\n\r\n`),
+    body,
+    Buffer.from(`${JSON.stringify(ndjson)}\n`),
+  ]);
+  const first = tryReadMcpMessage(buffer);
+  assert.deepEqual(first?.value, framed);
+  const second = tryReadMcpMessage(first!.rest);
+  assert.deepEqual(second?.value, ndjson);
+});
+
 test("glama.json matches the claim schema and lists icohangar-ops", () => {
   const raw = readFileSync(join(repoRoot(), "glama.json"), "utf8");
   const json = JSON.parse(raw) as { $schema?: string; maintainers?: string[] };
@@ -63,7 +96,7 @@ test("stdio JSON-RPC initialize then tools/list omits the mega fixture", async (
   }
 });
 
-test("stdio Content-Length framing round-trips initialize and tools/list", async () => {
+test("stdio NDJSON round-trips initialize and tools/list", async () => {
   const gateway = new GovernedGateway();
   gateway.seedDemo();
   const stdin = new PassThrough();
@@ -80,6 +113,11 @@ test("stdio Content-Length framing round-trips initialize and tools/list", async
   stdin.end();
 
   await running;
+  const raw = Buffer.concat(chunks).toString("utf8");
+  assert.ok(!raw.includes("Content-Length"));
+  for (const line of raw.trim().split("\n")) {
+    JSON.parse(line);
+  }
   const messages = readAllFramed(Buffer.concat(chunks));
   assert.equal(messages.length, 4);
   assert.equal((messages[0]?.result as { serverInfo: { name: string } }).serverInfo.name, "governed-mcp-gateway");
@@ -88,4 +126,28 @@ test("stdio Content-Length framing round-trips initialize and tools/list", async
   assert.ok(!tools.includes("docs.mega_schema"));
   assert.deepEqual(messages[2]?.result, { resources: [] });
   assert.deepEqual(messages[3]?.result, { prompts: [] });
+});
+
+test("stdio accepts Content-Length input and replies with NDJSON", async () => {
+  const gateway = new GovernedGateway();
+  gateway.seedDemo();
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  const chunks: Buffer[] = [];
+  stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+  const running = serveStdio(gateway, stdin, stdout);
+
+  writeContentLengthMessage(stdin, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "0" } },
+  });
+  stdin.end();
+
+  await running;
+  const raw = Buffer.concat(chunks).toString("utf8");
+  assert.ok(!raw.includes("Content-Length"));
+  const parsed = JSON.parse(raw.trim()) as { result: { serverInfo: { name: string } } };
+  assert.equal(parsed.result.serverInfo.name, "governed-mcp-gateway");
 });

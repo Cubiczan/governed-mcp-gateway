@@ -7,6 +7,8 @@
 #
 #   Build steps: ["npm ci --no-audit --no-fund"]
 #   CMD arguments: ["node", "--import", "tsx", "packages/governed-mcp-gateway/src/mcp.ts"]
+#
+# Stdio stdout is NDJSON (Glama mcp-proxy). Do not emit Content-Length headers.
 
 FROM node:22-slim
 

@@ -82,52 +82,80 @@ export function builtInCatalog(): CatalogTool[] {
   return [
     {
       name: "echo.ping",
-      description: "Governed echo. Returns the arguments and the calling principal.",
+      description:
+        "Identity probe. Echoes the call arguments and the authenticated Principal the gateway injected onto this tools/call (id, kind, org). Use it to confirm Bearer identity survived onto the tool worker. Does not hit a network, mutate vault state, or charge. Idempotent except for an audit-ledger append. Not a substitute for context.inspect.",
       pack: "core",
       server: DEFAULT_SERVER,
       inputSchema: objectSchema({
-        message: { type: "string", description: "Optional ping payload." },
+        message: {
+          type: "string",
+          description: "Optional ping payload echoed back in the result. Omit to send an empty ping.",
+        },
       }),
     },
     {
       name: "stripe.charge",
-      description: "Simulated charge. Spend-plane hook may run when amountCents > 0.",
+      description:
+        "Simulated payment tool. amountCents is integer cents. Under the demo auto-cap this returns a simulated charge plus the Principal; it never calls live Stripe. Not on the default tools/list pack — admit it with context.need (pack=payments) first. Research principals are denied JSON-RPC -32001. Over cap the gateway returns pending_human instead of charging. Optional spend-plane hook runs only when SPEND_PLANE_URL is set and amountCents > 0.",
       pack: "payments",
       server: DEFAULT_SERVER,
       inputSchema: objectSchema({
-        amountCents: { type: "integer", minimum: 0, description: "Charge amount in integer cents." },
+        amountCents: {
+          type: "integer",
+          minimum: 0,
+          description: "Charge amount in integer cents (not dollars). 0 is a no-op simulated charge.",
+        },
       }),
     },
     {
       name: "search.web",
-      description: "Governed web search stub.",
+      description:
+        "Governed web-search stub for the research principal. Returns an empty hits array plus the query and Principal. Does not call a live search API. Not on the PayOps allowlist or the default session pack — admit with context.need (pack=research) when the caller is allowlisted. Use echo.ping to test identity; use this only when you need a research-shaped tool.",
       pack: "research",
       server: DEFAULT_SERVER,
       inputSchema: objectSchema({
-        query: { type: "string", description: "Search query." },
+        query: { type: "string", description: "Search query string. Required for a useful stub result." },
       }),
     },
     {
       name: "context.inspect",
-      description: "Inspect the current session pack, schema token tax, and estate flags.",
+      description:
+        "Read the current session pack and schema token-tax report for the authenticated principal. Returns the bytes→tokens heuristic, session tool names, savedTokens versus the full allowlist, and (unless includeEstate=false) the estate including oversized flags. Does not admit tools and does not execute other tools. Call this before context.need to see what is already loaded. Fail-closed: requires the same principal as the session.",
       pack: "catalog",
       server: DEFAULT_SERVER,
       meta: true,
       inputSchema: objectSchema({
-        sessionId: { type: "string", description: "Optional session id; defaults to ses_<principal>." },
-        includeEstate: { type: "boolean", description: "Include the full catalog estate in the report." },
+        sessionId: {
+          type: "string",
+          description: "Optional session id; defaults to ses_<principalId> when omitted.",
+        },
+        includeEstate: {
+          type: "boolean",
+          description: "When false, omit the full catalog estate and return only session tax. Default true.",
+        },
       }),
     },
     {
       name: "context.need",
-      description: "Admit allowlisted tools or a named pack into this session (allow-by-need).",
+      description:
+        "Admit extra tools or a named pack into this session (allow-by-need). Always intersected with the principal allowlist — fail-closed. Research cannot admit stripe.charge. Does not run the admitted tools; call tools/list afterwards to see the new pack, or context.inspect to see tax. sessionId defaults to ses_<principalId>. Denied names are returned in denied[] and recorded on the ledger.",
       pack: "catalog",
       server: DEFAULT_SERVER,
       meta: true,
       inputSchema: objectSchema({
-        sessionId: { type: "string" },
-        tools: { type: "array", items: { type: "string" }, description: "Tool names to admit." },
-        pack: { type: "string", description: "Named pack to admit (intersected with the allowlist)." },
+        sessionId: {
+          type: "string",
+          description: "Optional session id; defaults to ses_<principalId> when omitted.",
+        },
+        tools: {
+          type: "array",
+          items: { type: "string" },
+          description: "Concrete tool names to admit (e.g. stripe.charge). Ignored when not allowlisted.",
+        },
+        pack: {
+          type: "string",
+          description: "Named pack to admit (catalog, core, payments, research). Intersected with the allowlist.",
+        },
       }),
     },
     oversizedCatalogTool(),

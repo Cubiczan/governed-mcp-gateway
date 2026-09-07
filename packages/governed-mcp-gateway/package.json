@@ -1,18 +1,35 @@
 {
   "name": "@cubiczan/governed-mcp-gateway",
   "version": "0.1.0",
+  "description": "Governed MCP gateway: principal on every tools/call and SSE frame, vaulted credential rotation, allowlists, schema token-tax packs.",
   "type": "module",
   "main": "./src/index.ts",
+  "bin": {
+    "governed-mcp-gateway": "./bin/mcp.js"
+  },
   "scripts": {
     "start": "node --import tsx src/server.ts",
+    "mcp": "node --import tsx src/mcp.ts",
     "test": "node --import tsx --test test/*.test.ts"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cubiczan/governed-mcp-gateway.git"
+  },
+  "homepage": "https://github.com/Cubiczan/governed-mcp-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/Cubiczan/governed-mcp-gateway/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "@cubiczan/shared": "*"
+    "@cubiczan/shared": "*",
+    "tsx": "^4.19.3"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
-    "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }
 }

@@ -83,7 +83,7 @@ packages/spend-mandate-plane/src/plane.ts   lanes, dual-key, rails
 packages/shared                             CHP gate, cents, HMAC ledger
 ```
 
-Sister SKUs: [governed-mcp-gateway](https://github.com/icohangar-ops/governed-mcp-gateway) (`:7474`), [cfo-agent-mesh](https://github.com/icohangar-ops/cfo-agent-mesh) (`:7476`).
+Sister SKUs in this workspace: [governed-mcp-gateway](../governed-mcp-gateway) (`:7474`), [cfo-agent-mesh](../cfo-agent-mesh) (`:7476`).
 
 ## License
 

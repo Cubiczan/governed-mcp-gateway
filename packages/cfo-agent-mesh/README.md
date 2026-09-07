@@ -93,7 +93,7 @@ packages/cfo-agent-mesh/src/engines/sbc.ts    ASC 718
 packages/shared                               HMAC ledger, CHP types
 ```
 
-Sister SKUs: [governed-mcp-gateway](https://github.com/icohangar-ops/governed-mcp-gateway) (`:7474`), [spend-mandate-plane](https://github.com/icohangar-ops/spend-mandate-plane) (`:7475`).
+Sister SKUs in this workspace: [governed-mcp-gateway](../governed-mcp-gateway) (`:7474`), [spend-mandate-plane](../spend-mandate-plane) (`:7475`).
 
 ## License
 

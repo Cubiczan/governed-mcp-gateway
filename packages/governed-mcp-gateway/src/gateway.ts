@@ -16,6 +16,14 @@ import type http from "node:http";
 import type { Json } from "@cubiczan/shared";
 import { ContextPackStore, resolveSessionId, type AdmitResult } from "./context-pack.ts";
 import {
+  bindHostBindings,
+  claimedPrincipalConflict,
+  inventedHostKeys,
+  stripHostOnlyKeys,
+  type HostBindResult,
+  type HostBindings,
+} from "./host-meta.ts";
+import {
   DEFAULT_TAX_THRESHOLDS,
   groupByServer,
   maxMinRatio,
@@ -125,26 +133,37 @@ export class GovernedGateway {
     this.thresholds = { ...DEFAULT_TAX_THRESHOLDS, ...options.taxThresholds };
     for (const def of builtInCatalog()) this.catalog.set(def.name, def);
 
-    this.tools.set("echo.ping", (args, principal) => ({
+    this.tools.set("echo.ping", (args, principal, host) => ({
       pong: true,
       echo: args,
       principal,
+      host,
     }));
-    this.tools.set("stripe.charge", (args, principal) => ({
+    this.tools.set("stripe.charge", (args, principal, host) => ({
       simulated: true,
       amountCents: args.amountCents ?? 0,
       principal,
+      host,
     }));
-    this.tools.set("search.web", (args, principal) => ({
+    this.tools.set("search.web", (args, principal, host) => ({
       hits: [],
       query: args.query ?? "",
       principal,
+      host,
+    }));
+    this.tools.set("index.query", (args, principal, host) => ({
+      hits: [],
+      query: args.query ?? "",
+      tenant: host.tenant,
+      index: host.index,
+      principal,
+      host,
     }));
     this.tools.set("context.inspect", (args, principal) => this.inspectContext(principal, args));
     this.tools.set("context.need", (args, principal) => this.needContext(principal, args) as unknown as Json);
-    this.tools.set("docs.mega_schema", (_args, principal) => {
+    this.tools.set("docs.mega_schema", (_args, principal, host) => {
       const tax = this.toolTax("docs.mega_schema");
-      return { accepted: true, principal, tokens: tax?.tokens ?? 0, bytes: tax?.bytes ?? 0 };
+      return { accepted: true, principal, host, tokens: tax?.tokens ?? 0, bytes: tax?.bytes ?? 0 };
     });
   }
 
@@ -166,7 +185,7 @@ export class GovernedGateway {
         displayName: "PayOps Runner",
       },
       agentKey,
-      ["echo.ping", "stripe.charge"],
+      ["echo.ping", "stripe.charge", "index.query"],
       50_000,
       5_000,
     );
@@ -178,7 +197,7 @@ export class GovernedGateway {
         displayName: "Research Scout",
       },
       researchKey,
-      ["echo.ping", "search.web"],
+      ["echo.ping", "search.web", "index.query"],
       10_000,
       1_000,
     );
@@ -255,11 +274,16 @@ export class GovernedGateway {
     return this.agents.get(id)?.principal;
   }
 
-  attachPrincipal(payload: Record<string, Json>, principal: Principal): Record<string, Json> {
+  attachPrincipal(
+    payload: Record<string, Json>,
+    principal: Principal,
+    host?: HostBindings,
+  ): Record<string, Json> {
     const params = asObject(payload.params);
     const meta = asObject(params._meta);
     const cubiczan = asObject(meta.cubiczan);
     cubiczan.principal = principal as unknown as Json;
+    if (host) cubiczan.host = host as unknown as Json;
     meta.cubiczan = cubiczan;
     params._meta = meta;
     return { ...payload, params };
@@ -275,6 +299,53 @@ export class GovernedGateway {
     );
   }
 
+  private headerValue(req: http.IncomingMessage | undefined, name: string): string {
+    if (!req) return "";
+    const raw = req.headers[name];
+    return typeof raw === "string" ? raw : Array.isArray(raw) ? (raw[0] ?? "") : "";
+  }
+
+  private queryValue(req: http.IncomingMessage | undefined, name: string): string {
+    if (!req) return "";
+    const host = req.headers.host ?? "localhost";
+    const url = new URL(req.url ?? "/", `http://${host}`);
+    return url.searchParams.get(name) ?? "";
+  }
+
+  hostBindingsFor(
+    principal: Principal,
+    params: Record<string, Json>,
+    req?: http.IncomingMessage,
+  ): HostBindResult {
+    const hostMeta = asObject(asObject(asObject(params._meta).cubiczan).host);
+    return bindHostBindings({
+      principal,
+      tenantClaim: {
+        header: this.headerValue(req, "x-cubiczan-tenant"),
+        query: this.queryValue(req, "tenant"),
+        meta: typeof hostMeta.tenant === "string" ? hostMeta.tenant : "",
+      },
+      indexClaim: {
+        header: this.headerValue(req, "x-cubiczan-index"),
+        query: this.queryValue(req, "index"),
+        meta: typeof hostMeta.index === "string" ? hostMeta.index : "",
+      },
+      vault: [...this.credentials.values()].map((cred) => ({ name: cred.name, version: cred.version })),
+    });
+  }
+
+  denyHost(principal: Principal, reason: string, invented: string[], name?: string): never {
+    this.ledger.append({
+      event: "host.meta.denied",
+      actor: principal.id,
+      inputs: { reason, invented, name: name ?? null },
+      sources: ["host-meta"],
+    });
+    throw Object.assign(new Error(reason), {
+      rpc: { code: -32006, message: reason, data: { invented } },
+    });
+  }
+
   allowlistOf(principal: Principal): string[] {
     return this.agents.get(principal.id)?.allowlist ?? [];
   }
@@ -282,11 +353,15 @@ export class GovernedGateway {
   toolTax(name: string): ToolTax | undefined {
     const def = this.catalog.get(name);
     if (!def) return undefined;
-    return measureToolSchema(def, this.thresholds.toolTokens);
+    const listed = toListedTool(def);
+    return measureToolSchema({ ...def, ...listed }, this.thresholds.toolTokens);
   }
 
   estateTaxes(): ToolTax[] {
-    return [...this.catalog.values()].map((def) => measureToolSchema(def, this.thresholds.toolTokens));
+    return [...this.catalog.values()].map((def) => {
+      const listed = toListedTool(def);
+      return measureToolSchema({ ...def, ...listed }, this.thresholds.toolTokens);
+    });
   }
 
   estateReport(): ContextTaxReport["estate"] {
@@ -397,7 +472,7 @@ export class GovernedGateway {
 
   listTools(principal: Principal, params: Record<string, Json>, req?: http.IncomingMessage): {
     tools: Array<{ name: string; description: string; inputSchema: Json }>;
-    _meta: { cubiczan: { principal: Principal; sessionId: string; tax: ListTax } };
+    _meta: { cubiczan: { principal: Principal; sessionId: string; tax: ListTax; host: HostBindings } };
   } {
     const sessionId = this.sessionIdFor(principal, params, req);
     const catalog = [...this.catalog.values()];
@@ -453,9 +528,12 @@ export class GovernedGateway {
       });
     }
 
+    const hostBound = this.hostBindingsFor(principal, params, req);
+    if (!hostBound.ok) this.denyHost(principal, hostBound.reason, hostBound.invented, "tools/list");
+
     return {
       tools: listed,
-      _meta: { cubiczan: { principal, sessionId, tax } },
+      _meta: { cubiczan: { principal, sessionId, tax, host: hostBound.host } },
     };
   }
 
@@ -483,7 +561,12 @@ export class GovernedGateway {
     });
   }
 
-  async dispatchTool(principal: Principal, name: string, args: Record<string, Json>): Promise<Json> {
+  async dispatchTool(
+    principal: Principal,
+    name: string,
+    args: Record<string, Json>,
+    host: HostBindings,
+  ): Promise<Json> {
     const agent = this.agents.get(principal.id);
     if (!agent) throw new Error("unknown principal");
     if (!canExpose(name, agent.allowlist)) {
@@ -495,6 +578,22 @@ export class GovernedGateway {
         sources: ["allowlist"],
       });
       throw Object.assign(new Error(error.message), { rpc: error });
+    }
+
+    const def = this.catalog.get(name);
+    const extraHostKeys = [...(def?.hostOnly ?? []), ...this.credentials.keys()];
+    const invented = inventedHostKeys(args, extraHostKeys);
+    if (invented.length > 0) {
+      stripHostOnlyKeys(args, extraHostKeys);
+      this.denyHost(principal, `model invented host-only argument(s): ${invented.join(", ")}`, invented, name);
+    }
+    for (const key of def?.hostOnly ?? []) {
+      if (key === "index" && !host.index) {
+        this.denyHost(principal, "host index is not bound", ["index"], name);
+      }
+      if (key === "tenant" && !host.tenant) {
+        this.denyHost(principal, "host tenant is not bound", ["tenant"], name);
+      }
     }
 
     const amountCents = Number(args.amountCents ?? 0) || 0;
@@ -545,7 +644,7 @@ export class GovernedGateway {
 
     const impl = this.tools.get(name);
     if (!impl) throw new Error(`unknown tool ${name}`);
-    const result = impl(args, principal);
+    const result = impl(args, principal, host);
     this.ledger.append({
       event: "tool.called",
       actor: principal.id,
@@ -594,7 +693,14 @@ export class GovernedGateway {
           return;
         }
         const sessionId = url.searchParams.get("session") ?? undefined;
-        sendJson(res, 200, this.contextTaxReport(principal, sessionId));
+        try {
+          sendJson(res, 200, this.contextTaxReport(principal, sessionId));
+        } catch (error) {
+          const mismatch = error && typeof error === "object" && "code" in error && (error as { code: string }).code === "session_mismatch";
+          sendJson(res, mismatch ? 409 : 500, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         return;
       }
 
@@ -621,10 +727,17 @@ export class GovernedGateway {
           return;
         }
         const sessionId = this.sessionIdFor(principal, obj, req);
-        sendJson(res, 200, this.admitNeed(principal, sessionId, {
-          tools: asStringArray(obj.tools),
-          pack: typeof obj.pack === "string" ? obj.pack : undefined,
-        }));
+        try {
+          sendJson(res, 200, this.admitNeed(principal, sessionId, {
+            tools: asStringArray(obj.tools),
+            pack: typeof obj.pack === "string" ? obj.pack : undefined,
+          }));
+        } catch (error) {
+          const mismatch = error && typeof error === "object" && "code" in error && (error as { code: string }).code === "session_mismatch";
+          sendJson(res, mismatch ? 409 : 500, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         return;
       }
 
@@ -688,26 +801,70 @@ export class GovernedGateway {
           return;
         }
         if (method === "tools/list") {
-          sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id,
-            result: this.listTools(principal, asObject(obj.params), req),
-          });
+          try {
+            sendJson(res, 200, {
+              jsonrpc: "2.0",
+              id,
+              result: this.listTools(principal, asObject(obj.params), req),
+            });
+          } catch (error) {
+            const rpc = (error as { rpc?: { code: number; message: string; data?: unknown } }).rpc;
+            const mismatch = error && typeof error === "object" && "code" in error && (error as { code: string }).code === "session_mismatch";
+            sendJson(res, 200, {
+              jsonrpc: "2.0",
+              id,
+              error:
+                rpc ??
+                (mismatch
+                  ? { code: -32007, message: error instanceof Error ? error.message : "session mismatch" }
+                  : { code: -32000, message: error instanceof Error ? error.message : String(error) }),
+            });
+          }
           return;
         }
         if (method === "tools/call") {
-          const attached = this.attachPrincipal(obj, principal);
+          const paramsIn = asObject(obj.params);
+          const claimed = asObject(asObject(asObject(paramsIn._meta).cubiczan).principal);
+          const impersonation = claimedPrincipalConflict(principal, claimed);
+          if (impersonation) {
+            try {
+              this.denyHost(principal, impersonation, ["principal"], String(paramsIn.name ?? ""));
+            } catch (error) {
+              const rpc = (error as { rpc?: { code: number; message: string; data?: unknown } }).rpc;
+              sendJson(res, 200, {
+                jsonrpc: "2.0",
+                id,
+                error: rpc ?? { code: -32006, message: impersonation },
+              });
+              return;
+            }
+          }
+          const hostBound = this.hostBindingsFor(principal, paramsIn, req);
+          if (!hostBound.ok) {
+            try {
+              this.denyHost(principal, hostBound.reason, hostBound.invented, String(paramsIn.name ?? ""));
+            } catch (error) {
+              const rpc = (error as { rpc?: { code: number; message: string; data?: unknown } }).rpc;
+              sendJson(res, 200, {
+                jsonrpc: "2.0",
+                id,
+                error: rpc ?? { code: -32006, message: hostBound.reason },
+              });
+              return;
+            }
+          }
+          const attached = this.attachPrincipal(obj, principal, hostBound.host);
           const params = asObject(attached.params);
           const name = String(params.name ?? "");
           const args = asObject(params.arguments);
           try {
-            const result = await this.dispatchTool(principal, name, args);
+            const result = await this.dispatchTool(principal, name, args, hostBound.host);
             sendJson(res, 200, {
               jsonrpc: "2.0",
               id,
               result: {
                 content: [{ type: "text", text: JSON.stringify(result) }],
-                _meta: { cubiczan: { principal } },
+                _meta: { cubiczan: { principal, host: hostBound.host } },
                 structuredContent: result,
               },
             });

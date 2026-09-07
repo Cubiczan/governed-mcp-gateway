@@ -540,10 +540,10 @@ export class GovernedGateway {
   } {
     const sessionId = this.sessionIdFor(principal, params, req);
     const catalog = [...this.catalog.values()];
-    const session = this.packs.ensure(sessionId, principal.id, this.allowlistOf(principal), catalog);
     const need = asStringArray(params.need);
     const pack = typeof params.pack === "string" ? params.pack : undefined;
     if (need.length > 0 || pack) this.admitNeed(principal, sessionId, { tools: need, pack });
+    const session = this.packs.ensure(sessionId, principal.id, this.allowlistOf(principal), catalog);
 
     const mode = params.mode === "full" ? "full" : "pack";
     const allowlist = this.allowlistOf(principal);

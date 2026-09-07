@@ -16,6 +16,17 @@ import type http from "node:http";
 import type { Json } from "@cubiczan/shared";
 import { ContextPackStore, resolveSessionId, type AdmitResult } from "./context-pack.ts";
 import {
+  SESSION_RPC_CODE,
+  defaultReplicaId,
+  parseSessionMode,
+  requiresTransportSession,
+  sessionDenied,
+  InMemorySessionStore,
+  type SessionDenied,
+  type SessionMode,
+  type SessionStore,
+} from "./session-store.ts";
+import {
   DEFAULT_TAX_THRESHOLDS,
   groupByServer,
   maxMinRatio,
@@ -31,6 +42,7 @@ import {
 import {
   builtInCatalog,
   canExpose,
+  defaultSeedTools,
   toListedTool,
   type CatalogTool,
   type ToolImpl,
@@ -57,6 +69,9 @@ export interface GatewayOptions {
   spendPlaneUrl?: string;
   auditKey?: string;
   taxThresholds?: Partial<TaxThresholds>;
+  sessionMode?: SessionMode;
+  replicaId?: string;
+  sessionStore?: SessionStore;
 }
 
 export interface ContextTaxReport {
@@ -104,9 +119,17 @@ function asStringArray(value: Json | undefined): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
-function headerSession(req: http.IncomingMessage): string {
-  const raw = req.headers["x-cubiczan-session"];
+function headerValue(req: http.IncomingMessage, name: string): string {
+  const raw = req.headers[name.toLowerCase()];
   return typeof raw === "string" ? raw : Array.isArray(raw) ? (raw[0] ?? "") : "";
+}
+
+function headerSession(req: http.IncomingMessage): string {
+  return headerValue(req, "x-cubiczan-session");
+}
+
+function mcpSessionHeader(req: http.IncomingMessage): string {
+  return headerValue(req, "mcp-session-id").trim();
 }
 
 export class GovernedGateway {
@@ -116,13 +139,20 @@ export class GovernedGateway {
   readonly keys = new Map<string, string>();
   readonly catalog = new Map<string, CatalogTool>();
   readonly tools = new Map<string, ToolImpl>();
-  readonly packs = new ContextPackStore();
+  readonly packs: ContextPackStore;
+  readonly sessionStore: SessionStore;
+  readonly sessionMode: SessionMode;
+  readonly replicaId: string;
   readonly thresholds: TaxThresholds;
   private seq = 0;
 
   constructor(private readonly options: GatewayOptions = {}) {
     this.ledger = new AuditLedger(options.auditKey ?? "gateway-demo-key");
     this.thresholds = { ...DEFAULT_TAX_THRESHOLDS, ...options.taxThresholds };
+    this.sessionMode = options.sessionMode ?? parseSessionMode(process.env.MCP_SESSION_MODE);
+    this.replicaId = defaultReplicaId(options.replicaId);
+    this.sessionStore = options.sessionStore ?? new InMemorySessionStore();
+    this.packs = new ContextPackStore({ store: this.sessionStore, replicaId: this.replicaId });
     for (const def of builtInCatalog()) this.catalog.set(def.name, def);
 
     this.tools.set("echo.ping", (args, principal) => ({
@@ -267,11 +297,120 @@ export class GovernedGateway {
 
   sessionIdFor(principal: Principal, params: Record<string, Json>, req?: http.IncomingMessage): string {
     const meta = asObject(asObject(params._meta).cubiczan);
+    const cubiczanHeader = req ? headerSession(req) : "";
+    const transportHeader = req && this.sessionMode !== "stateless" ? mcpSessionHeader(req) : "";
     return resolveSessionId(
       principal.id,
       typeof params.sessionId === "string" ? params.sessionId : undefined,
-      req ? headerSession(req) : "",
+      cubiczanHeader || transportHeader,
       typeof meta.sessionId === "string" ? meta.sessionId : undefined,
+    );
+  }
+
+  mintTransportSession(principal: Principal): { id: string } {
+    const id = newId("mcp");
+    this.packs.getOrCreate(id, principal.id, defaultSeedTools(this.allowlistOf(principal), [...this.catalog.values()]));
+    this.ledger.append({
+      event: "session.opened",
+      actor: principal.id,
+      inputs: { sessionId: id, mode: this.sessionMode, replicaId: this.replicaId },
+      sources: ["streamable-http"],
+    });
+    return { id };
+  }
+
+  validateTransportSession(
+    req: http.IncomingMessage,
+    principal: Principal,
+  ): { sessionId: string } | { denied: SessionDenied } {
+    if (!requiresTransportSession(this.sessionMode)) {
+      return { sessionId: this.sessionIdFor(principal, {}, req) };
+    }
+    const sessionId = mcpSessionHeader(req);
+    if (!sessionId) {
+      return {
+        denied: sessionDenied("MISSING_SESSION", "Mcp-Session-Id is required in this deployment mode", {
+          hint: "Call initialize first, pin ingress affinity to one replica, or set MCP_SESSION_MODE=stateless.",
+        }),
+      };
+    }
+    const record = this.sessionStore.get(sessionId);
+    if (!record) {
+      if (this.sessionMode === "sticky") {
+        return {
+          denied: sessionDenied("SESSION_STICKY_MISMATCH", "MCP session is unknown on this replica", {
+            sessionId,
+            hint: "Session was minted on another replica or the replica was replaced. Re-run initialize, enable a shared SessionStore, or switch to STATELESS.",
+          }),
+        };
+      }
+      return {
+        denied: sessionDenied("UNKNOWN_SESSION", "MCP session is unknown or expired", {
+          sessionId,
+          hint: "Re-run initialize. The shared store has no record for this Mcp-Session-Id.",
+        }),
+      };
+    }
+    if (this.sessionMode === "sticky" && record.replicaId !== this.replicaId) {
+      return {
+        denied: sessionDenied("SESSION_STICKY_MISMATCH", "MCP session is bound to another replica", {
+          sessionId,
+          hint: `Session replica is ${record.replicaId}; this process is ${this.replicaId}. Use ingress affinity, a shared SessionStore, or STATELESS.`,
+        }),
+      };
+    }
+    if (record.principalId !== principal.id) {
+      return {
+        denied: sessionDenied("SESSION_PRINCIPAL_MISMATCH", "session belongs to another principal", {
+          sessionId,
+          hint: "The Bearer principal does not own this Mcp-Session-Id.",
+        }),
+      };
+    }
+    return { sessionId };
+  }
+
+  private sessionResponseHeaders(sessionId?: string): http.OutgoingHttpHeaders | undefined {
+    if (!sessionId || this.sessionMode === "stateless") return undefined;
+    return { "Mcp-Session-Id": sessionId };
+  }
+
+  private denySession(
+    res: http.ServerResponse,
+    id: Json,
+    denied: SessionDenied,
+    principalId?: string,
+  ): void {
+    this.ledger.append({
+      event: "session.denied",
+      actor: principalId ?? "anonymous",
+      inputs: {
+        reason: denied.reason,
+        sessionId: denied.sessionId ?? null,
+        mode: this.sessionMode,
+        replicaId: this.replicaId,
+      },
+      sources: ["streamable-http"],
+    });
+    sendJson(
+      res,
+      denied.httpStatus,
+      {
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: SESSION_RPC_CODE,
+          message: denied.message,
+          data: {
+            reason: denied.reason,
+            replicaId: this.replicaId,
+            mode: this.sessionMode,
+            sessionId: denied.sessionId ?? null,
+            hint: denied.hint,
+          },
+        },
+      },
+      this.sessionResponseHeaders(denied.sessionId),
     );
   }
 
@@ -559,7 +698,12 @@ export class GovernedGateway {
   createHttpServer(): http.Server {
     return createServer(async (req, res, url, body) => {
       if (req.method === "GET" && url.pathname === "/health") {
-        sendJson(res, 200, { ok: true, service: "governed-mcp-gateway" });
+        sendJson(res, 200, {
+          ok: true,
+          service: "governed-mcp-gateway",
+          sessionMode: this.sessionMode,
+          replicaId: this.replicaId,
+        });
         return;
       }
 
@@ -567,6 +711,11 @@ export class GovernedGateway {
         const principal = this.resolvePrincipal(req);
         if (!principal) {
           sendJson(res, 401, { error: "unauthorized" });
+          return;
+        }
+        const checked = this.validateTransportSession(req, principal);
+        if ("denied" in checked) {
+          this.denySession(res, null, checked.denied, principal.id);
           return;
         }
         const sse = openSse(res);
@@ -667,6 +816,30 @@ export class GovernedGateway {
         return;
       }
 
+      if (req.method === "DELETE" && (url.pathname === "/mcp" || url.pathname === "/")) {
+        const principal = this.resolvePrincipal(req);
+        if (!principal) {
+          sendJson(res, 401, { error: "unauthorized" });
+          return;
+        }
+        const checked = this.validateTransportSession(req, principal);
+        if ("denied" in checked) {
+          this.denySession(res, null, checked.denied, principal.id);
+          return;
+        }
+        if (requiresTransportSession(this.sessionMode)) {
+          this.sessionStore.delete(checked.sessionId);
+          this.ledger.append({
+            event: "session.closed",
+            actor: principal.id,
+            inputs: { sessionId: checked.sessionId, mode: this.sessionMode, replicaId: this.replicaId },
+            sources: ["streamable-http"],
+          });
+        }
+        sendJson(res, 200, { ok: true, closed: checked.sessionId }, this.sessionResponseHeaders(checked.sessionId));
+        return;
+      }
+
       if (req.method === "POST" && (url.pathname === "/mcp" || url.pathname === "/")) {
         const principal = this.resolvePrincipal(req);
         if (!principal) {
@@ -676,23 +849,62 @@ export class GovernedGateway {
         const method = String(obj.method ?? "");
         const id = obj.id ?? null;
         if (method === "initialize") {
-          sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id,
-            result: {
-              protocolVersion: "2025-03-26",
-              serverInfo: { name: "governed-mcp-gateway", version: "0.1.0" },
-              capabilities: { tools: {}, logging: {} },
+          const minted = requiresTransportSession(this.sessionMode)
+            ? this.mintTransportSession(principal)
+            : undefined;
+          sendJson(
+            res,
+            200,
+            {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                protocolVersion: "2025-03-26",
+                serverInfo: { name: "governed-mcp-gateway", version: "0.1.0" },
+                capabilities: {
+                  tools: {},
+                  logging: {},
+                  cubiczan: { sessionMode: this.sessionMode, replicaId: this.replicaId },
+                },
+              },
             },
-          });
+            this.sessionResponseHeaders(minted?.id),
+          );
+          return;
+        }
+        const checked = this.validateTransportSession(req, principal);
+        if ("denied" in checked) {
+          this.denySession(res, id, checked.denied, principal.id);
           return;
         }
         if (method === "tools/list") {
-          sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id,
-            result: this.listTools(principal, asObject(obj.params), req),
-          });
+          try {
+            sendJson(
+              res,
+              200,
+              {
+                jsonrpc: "2.0",
+                id,
+                result: this.listTools(principal, asObject(obj.params), req),
+              },
+              this.sessionResponseHeaders(requiresTransportSession(this.sessionMode) ? checked.sessionId : undefined),
+            );
+          } catch (error) {
+            const code = (error as { code?: string }).code;
+            if (code === "session_mismatch") {
+              this.denySession(
+                res,
+                id,
+                sessionDenied("SESSION_PRINCIPAL_MISMATCH", "session belongs to another principal", {
+                  sessionId: checked.sessionId,
+                  hint: "The Bearer principal does not own this session pack.",
+                }),
+                principal.id,
+              );
+              return;
+            }
+            throw error;
+          }
           return;
         }
         if (method === "tools/call") {
@@ -702,22 +914,32 @@ export class GovernedGateway {
           const args = asObject(params.arguments);
           try {
             const result = await this.dispatchTool(principal, name, args);
-            sendJson(res, 200, {
-              jsonrpc: "2.0",
-              id,
-              result: {
-                content: [{ type: "text", text: JSON.stringify(result) }],
-                _meta: { cubiczan: { principal } },
-                structuredContent: result,
+            sendJson(
+              res,
+              200,
+              {
+                jsonrpc: "2.0",
+                id,
+                result: {
+                  content: [{ type: "text", text: JSON.stringify(result) }],
+                  _meta: { cubiczan: { principal } },
+                  structuredContent: result,
+                },
               },
-            });
+              this.sessionResponseHeaders(requiresTransportSession(this.sessionMode) ? checked.sessionId : undefined),
+            );
           } catch (error) {
             const rpc = (error as { rpc?: { code: number; message: string; data?: unknown } }).rpc;
-            sendJson(res, 200, {
-              jsonrpc: "2.0",
-              id,
-              error: rpc ?? { code: -32000, message: error instanceof Error ? error.message : String(error) },
-            });
+            sendJson(
+              res,
+              200,
+              {
+                jsonrpc: "2.0",
+                id,
+                error: rpc ?? { code: -32000, message: error instanceof Error ? error.message : String(error) },
+              },
+              this.sessionResponseHeaders(requiresTransportSession(this.sessionMode) ? checked.sessionId : undefined),
+            );
           }
           return;
         }

@@ -8,7 +8,7 @@ Three SKUs, one workspace. MCP clients keep a Bearer principal through `tools/ca
 
 | SKU | Port | Repo | Job |
 |---|---|---|---|
-| [Governed MCP Gateway](packages/governed-mcp-gateway) | `:7474` | [icohangar-ops/governed-mcp-gateway](https://github.com/icohangar-ops/governed-mcp-gateway) | Principal on every tool call and SSE frame. Vaulted credential rotation. Tool allowlists. Schema token-tax ledger and pack / allow-by-need `tools/list`. |
+| [Governed MCP Gateway](packages/governed-mcp-gateway) | `:7474` | [icohangar-ops/governed-mcp-gateway](https://github.com/icohangar-ops/governed-mcp-gateway) | Principal on every tool call and SSE frame. Vaulted credential rotation. Tool allowlists. Schema token-tax ledger and pack / allow-by-need `tools/list`. Streamable HTTP multi-replica sessions (STATELESS / sticky / shared store). |
 | [Agent Spend & Mandate Plane](packages/spend-mandate-plane) | `:7475` | [icohangar-ops/spend-mandate-plane](https://github.com/icohangar-ops/spend-mandate-plane) | Propose → mandate → countersign → settle. Stripe by default; x402 is a rail. |
 | [Auditable CFO Agent Mesh](packages/cfo-agent-mesh) | `:7476` | [icohangar-ops/cfo-agent-mesh](https://github.com/icohangar-ops/cfo-agent-mesh) | Claim → agent → lock → document. ASC 842 / 606 / 718 engines. HMAC-chained evidence pack. |
 
@@ -64,6 +64,7 @@ curl -sS -H "Authorization: Bearer mcp_agt_payops_demo" \
 | Method | Path | What |
 |---|---|---|
 | `POST` | `/mcp` | JSON-RPC `initialize`, `tools/list` (default: session pack), `tools/call` |
+| `DELETE` | `/mcp` | End a sticky/shared `Mcp-Session-Id` |
 | `GET` | `/mcp/sse?once=1` | SSE notification with `_meta.cubiczan.principal` |
 | `GET` | `/v1/context/tax` | Schema token-tax estate + session report |
 | `POST` | `/v1/context/need` | Admit allowlisted tools into the session pack |
@@ -125,7 +126,9 @@ curl -sS -H "Authorization: Bearer cfo_agt_lease_demo" \
 
 ## Specs
 
-OpenSpec changes: [`ship-three-sku-platform`](openspec/changes/ship-three-sku-platform/), [`tools-list-token-tax`](openspec/changes/tools-list-token-tax/).
+OpenSpec changes: [`ship-three-sku-platform`](openspec/changes/ship-three-sku-platform/), [`tools-list-token-tax`](openspec/changes/tools-list-token-tax/), [`streamable-http-multi-replica`](openspec/changes/streamable-http-multi-replica/).
+
+Streamable HTTP on Kubernetes (sticky vs shared store vs fail-closed STATELESS): [`docs/streamable-http-multi-replica.md`](docs/streamable-http-multi-replica.md).
 
 ## License
 

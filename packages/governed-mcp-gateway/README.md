@@ -15,6 +15,7 @@ It:
 - Enforces per-principal tool allowlists
 - Measures `tools/list` schema **token tax** and exposes a **pack / allow-by-need** catalog instead of dumping every schema every turn
 - Optionally hooks the spend-mandate plane before a priced tool runs
+- Makes Streamable HTTP **multi-replica** explicit: default **STATELESS**, or sticky / shared-store sessions — never silent in-process affinity
 
 ## Live behavior
 
@@ -67,8 +68,9 @@ curl -sS -H "Authorization: Bearer mcp_human_controller_demo" \
 
 | Method | Path | Auth | What |
 |---|---|---|---|
-| `GET` | `/health` | — | `{ ok, service }` |
+| `GET` | `/health` | — | `{ ok, service, sessionMode, replicaId }` |
 | `POST` | `/mcp` | Bearer agent or human | JSON-RPC `initialize`, `tools/list`, `tools/call` |
+| `DELETE` | `/mcp` | Bearer | Close a sticky/shared `Mcp-Session-Id` |
 | `GET` | `/mcp/sse` | Bearer | `notifications/message` with principal on `_meta` |
 | `GET` | `/v1/context/tax` | Bearer | Schema token-tax ledger / estate report |
 | `GET` | `/v1/context/packs` | Bearer | Named packs and per-server cost |
@@ -118,6 +120,20 @@ curl -sS -H "Authorization: Bearer mcp_human_controller_demo" \
 
 `params.mode=full` dumps every allowlisted schema (legacy). Oversized packs are **flagged** on the report and ledger (`schema.pack.flagged`), not silently dropped.
 
+## Streamable HTTP on more than one replica
+
+In-process `Mcp-Session-Id` maps do not survive a Kubernetes Service. That is [SO 79962720](https://stackoverflow.com/questions/79962720). This SKU defaults to **STATELESS** (`MCP_SESSION_MODE=stateless`): `initialize` does not mint a session, and `tools/list` / `tools/call` run from the Bearer principal already on the RPC.
+
+| Mode | Env | Fail-closed reasons |
+|---|---|---|
+| `stateless` (default) | `MCP_SESSION_MODE=stateless` | Transport session not required |
+| `sticky` | `MCP_SESSION_MODE=sticky` | `MISSING_SESSION`, `SESSION_STICKY_MISMATCH` |
+| `shared` | `MCP_SESSION_MODE=shared` | `MISSING_SESSION`, `UNKNOWN_SESSION` |
+
+Sticky is acceptable only behind cookie/header affinity for short-lived sessions. It is **not** acceptable as the HA story: rolling deploys and scale-in destroy the replica that owns the map. Shared mode takes a `SessionStore` (in-memory or Redis-like; CI never opens live Redis). Missing/stale sessions return HTTP 400/404 **and** JSON-RPC `-32020` with `data.reason` — never a silent empty 200.
+
+Operator cookbook (ingress snippets, curl proofs): [docs/streamable-http-multi-replica.md](../../docs/streamable-http-multi-replica.md).
+
 ### Packs
 
 | Pack | Tools | Default list |
@@ -139,7 +155,9 @@ packages/governed-mcp-gateway/src/gateway.ts       HTTP + JSON-RPC + SSE + vault
 packages/governed-mcp-gateway/src/token-tax.ts     bytes→token heuristic + report types
 packages/governed-mcp-gateway/src/tool-catalog.ts  packs + oversized fixture expansion
 packages/governed-mcp-gateway/src/context-pack.ts  session packs, allow-by-need
+packages/governed-mcp-gateway/src/session-store.ts Streamable HTTP session modes + store
 packages/shared                                    CHP gate, HMAC ledger, SSE helper
+docs/streamable-http-multi-replica.md              sticky vs shared vs STATELESS runbook
 ```
 
 Sister SKUs: [spend-mandate-plane](https://github.com/icohangar-ops/spend-mandate-plane) (`:7475`), [cfo-agent-mesh](https://github.com/icohangar-ops/cfo-agent-mesh) (`:7476`).

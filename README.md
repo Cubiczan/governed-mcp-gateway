@@ -65,12 +65,57 @@ curl -sS -H "Authorization: Bearer mcp_agt_payops_demo" \
 
 | Method | Path | What |
 |---|---|---|
-| `POST` | `/mcp` | JSON-RPC `initialize`, `tools/list` (default: session pack), `tools/call` |
-| `GET` | `/mcp/sse?once=1` | SSE notification with `_meta.cubiczan.principal` |
+| `GET` | `/health` `/healthz` | Liveness (`{ ok, service, transport, mode }`). No auth. |
+| `POST` | `/mcp` | Streamable HTTP JSON-RPC `initialize`, `tools/list` (default: session pack), `tools/call` |
+| `GET` | `/mcp/sse?once=1` | Local SSE notification with `_meta.cubiczan.principal` (not the Vercel path) |
 | `GET` | `/v1/context/tax` | Schema token-tax estate + session report |
 | `POST` | `/v1/context/need` | Admit allowlisted tools into the session pack |
 | `POST` | `/v1/credentials/:name/rotate` | Human-only vault rotate; old hash dies |
 | `POST` | `/v1/credentials/verify` | Check a secret against the current hash |
+
+### Glama remote connector
+
+Glama can health-check a **stateless Streamable HTTP** remote at `https://$VERCEL_URL/mcp` with Bearer auth. This is the hosted HTTPS path. Stdio (`npm run mcp` / Dockerfile CMD) remains the Glama Docker build path.
+
+**Vercel project settings** (import this GitHub repo; do not invent a hostname):
+
+| Setting | Value |
+|---|---|
+| Root Directory | `.` (repository root — `vercel.json` + `api/`) |
+| Framework Preset | Other (`vercel.json` sets `"framework": null`) |
+| Fluid Compute | On (`"fluid": true`) |
+| Node.js | 20 or later |
+
+**Environment variables** (Vercel Project → Settings → Environment Variables). Rotate the demo values before a public URL:
+
+| Name | Local demo | Role |
+|---|---|---|
+| `GATEWAY_AGENT_KEY` | `mcp_agt_payops_demo` | Glama connector Bearer (PayOps allowlist) |
+| `GATEWAY_HUMAN_KEY` | `mcp_human_controller_demo` | Vault / locks |
+| `GATEWAY_RESEARCH_KEY` | `mcp_agt_research_demo` | Research allowlist (no `stripe.charge`) |
+| `SPEND_PLANE_URL` | unset | Optional hook to `:7475` |
+
+Glama connector fields after deploy (replace `$VERCEL_URL` with the deployment host Vercel prints):
+
+- URL: `https://$VERCEL_URL/mcp`
+- Transport: Streamable HTTP
+- Authorization: `Bearer $GATEWAY_AGENT_KEY`
+
+Local smoke (no public hostname):
+
+```bash
+npm run mcp:http:smoke
+# or:
+npm run gateway
+curl -sS http://127.0.0.1:7474/health
+curl -sS -H "Authorization: Bearer mcp_agt_payops_demo" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+  http://127.0.0.1:7474/mcp
+```
+
+`initialize` does not mint `Mcp-Session-Id`. Pass `params.pack` / `params.need` on the same `tools/list` when you need more than the session pack. `GET /mcp` is 405 (no sticky SSE on the remote).
 
 ---
 
@@ -127,7 +172,7 @@ curl -sS -H "Authorization: Bearer cfo_agt_lease_demo" \
 
 ## Specs
 
-OpenSpec changes: [`ship-three-sku-platform`](openspec/changes/ship-three-sku-platform/), [`tools-list-token-tax`](openspec/changes/tools-list-token-tax/).
+OpenSpec changes: [`ship-three-sku-platform`](openspec/changes/ship-three-sku-platform/), [`tools-list-token-tax`](openspec/changes/tools-list-token-tax/), [`glama-streamable-http-remote`](openspec/changes/glama-streamable-http-remote/).
 
 ## License
 

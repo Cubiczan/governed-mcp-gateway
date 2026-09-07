@@ -3,13 +3,16 @@ import {
   AuditLedger,
   applyHumanLock,
   bearer,
+  bearerFromAuthorization,
   createServer,
+  incomingToRequest,
   isoNow,
   newId,
   openSse,
   postJson,
   runChpGate,
   sendJson,
+  sendWebResponse,
   type Principal,
 } from "@cubiczan/shared";
 import type http from "node:http";
@@ -120,9 +123,57 @@ function asStringArray(value: Json | undefined): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
-function headerSession(req: http.IncomingMessage): string {
+export type GatewayRequest = http.IncomingMessage | Request;
+
+function headerSession(req?: GatewayRequest): string {
+  if (!req) return "";
+  if (req instanceof Request) return req.headers.get("x-cubiczan-session") ?? "";
   const raw = req.headers["x-cubiczan-session"];
   return typeof raw === "string" ? raw : Array.isArray(raw) ? (raw[0] ?? "") : "";
+}
+
+function normalizePath(pathname: string): string {
+  return pathname.replace(/\/+$/, "") || "/";
+}
+
+function isMcpPath(pathname: string): boolean {
+  return pathname === "/mcp" || pathname === "/api" || pathname === "/";
+}
+
+function isHealthPath(pathname: string): boolean {
+  return pathname === "/health" || pathname === "/healthz";
+}
+
+function delegatedWebPath(method: string, pathname: string): boolean {
+  if (isHealthPath(pathname)) return true;
+  if (pathname === "/mcp" || pathname === "/api") return true;
+  if (pathname === "/" && (method === "POST" || method === "OPTIONS")) return true;
+  return false;
+}
+
+function corsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get("origin");
+  return {
+    "access-control-allow-origin": origin || "*",
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+    "access-control-allow-headers":
+      "Authorization, Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID, X-Cubiczan-Session",
+    "access-control-expose-headers": "Mcp-Session-Id, MCP-Protocol-Version",
+    "access-control-max-age": "86400",
+    vary: "Origin",
+  };
+}
+
+function jsonResponse(status: number, body: unknown, extra: Record<string, string> = {}): Response {
+  const payload = JSON.stringify(body);
+  return new Response(payload, {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": String(Buffer.byteLength(payload)),
+      ...extra,
+    },
+  });
 }
 
 export class GovernedGateway {
@@ -291,12 +342,12 @@ export class GovernedGateway {
     return { ...payload, params };
   }
 
-  sessionIdFor(principal: Principal, params: Record<string, Json>, req?: http.IncomingMessage): string {
+  sessionIdFor(principal: Principal, params: Record<string, Json>, req?: GatewayRequest): string {
     const meta = asObject(asObject(params._meta).cubiczan);
     return resolveSessionId(
       principal.id,
       typeof params.sessionId === "string" ? params.sessionId : undefined,
-      req ? headerSession(req) : "",
+      headerSession(req),
       typeof meta.sessionId === "string" ? meta.sessionId : undefined,
     );
   }
@@ -421,7 +472,7 @@ export class GovernedGateway {
     return result;
   }
 
-  listTools(principal: Principal, params: Record<string, Json>, req?: http.IncomingMessage): {
+  listTools(principal: Principal, params: Record<string, Json>, req?: GatewayRequest): {
     tools: Array<{ name: string; description: string; inputSchema: Json }>;
     _meta: { cubiczan: { principal: Principal; sessionId: string; tax: ListTax } };
   } {
@@ -596,10 +647,75 @@ export class GovernedGateway {
     };
   }
 
+  healthPayload(): Record<string, Json> {
+    return {
+      ok: true,
+      service: "governed-mcp-gateway",
+      transport: "streamable-http",
+      mode: "stateless",
+    };
+  }
+
+  async handleWebRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const pathname = normalizePath(url.pathname);
+    const cors = corsHeaders(request);
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: cors });
+    }
+
+    if ((request.method === "GET" || request.method === "HEAD") && isHealthPath(pathname)) {
+      const payload = JSON.stringify(this.healthPayload());
+      return new Response(request.method === "HEAD" ? null : payload, {
+        status: 200,
+        headers: {
+          ...cors,
+          "content-type": "application/json; charset=utf-8",
+          "content-length": String(Buffer.byteLength(payload)),
+        },
+      });
+    }
+
+    if (!isMcpPath(pathname)) {
+      return jsonResponse(404, { error: "not found" }, cors);
+    }
+
+    const principal = this.principalForToken(bearerFromAuthorization(request.headers.get("authorization")));
+    if (!principal) {
+      return jsonResponse(401, { error: "unauthorized" }, {
+        ...cors,
+        "www-authenticate": 'Bearer realm="governed-mcp-gateway", error="invalid_token"',
+      });
+    }
+
+    if (request.method !== "POST") {
+      return jsonResponse(
+        405,
+        { jsonrpc: "2.0", id: null, error: { code: -32000, message: "Method not allowed." } },
+        cors,
+      );
+    }
+
+    let obj: Record<string, Json> = {};
+    try {
+      const text = await request.text();
+      if (text.trim()) obj = asObject(JSON.parse(text) as Json);
+    } catch {
+      return jsonResponse(400, { error: "invalid json" }, cors);
+    }
+
+    const rpc = await this.handleJsonRpc(principal, obj, request);
+    return jsonResponse(200, rpc ?? { jsonrpc: "2.0", id: null, result: {} }, {
+      ...cors,
+      "mcp-protocol-version": "2025-03-26",
+    });
+  }
+
   async handleJsonRpc(
     principal: Principal,
     obj: Record<string, Json>,
-    req?: http.IncomingMessage,
+    req?: GatewayRequest,
   ): Promise<JsonRpcResponse | undefined> {
     const method = String(obj.method ?? "");
     const id = (Object.prototype.hasOwnProperty.call(obj, "id") ? obj.id : null) ?? null;
@@ -650,11 +766,6 @@ export class GovernedGateway {
 
   createHttpServer(): http.Server {
     return createServer(async (req, res, url, body) => {
-      if (req.method === "GET" && url.pathname === "/health") {
-        sendJson(res, 200, { ok: true, service: "governed-mcp-gateway" });
-        return;
-      }
-
       if (req.method === "GET" && url.pathname === "/mcp/sse") {
         const principal = this.resolvePrincipal(req);
         if (!principal) {
@@ -674,6 +785,13 @@ export class GovernedGateway {
         };
         sse.send("message", frame, String(this.seq));
         if (url.searchParams.get("once") === "1") sse.close();
+        return;
+      }
+
+      const path = normalizePath(url.pathname);
+      if (delegatedWebPath(req.method ?? "GET", path)) {
+        const webRes = await this.handleWebRequest(incomingToRequest(req, url, body));
+        await sendWebResponse(res, webRes);
         return;
       }
 
@@ -759,17 +877,6 @@ export class GovernedGateway {
         return;
       }
 
-      if (req.method === "POST" && (url.pathname === "/mcp" || url.pathname === "/")) {
-        const principal = this.resolvePrincipal(req);
-        if (!principal) {
-          sendJson(res, 401, { error: "unauthorized" });
-          return;
-        }
-        const rpc = await this.handleJsonRpc(principal, obj, req);
-        sendJson(res, 200, rpc ?? { jsonrpc: "2.0", id: null, result: {} });
-        return;
-      }
-
       if (req.method === "POST" && url.pathname === "/v1/locks") {
         const principal = this.resolvePrincipal(req);
         if (!principal || principal.kind === "agent") {
@@ -784,4 +891,13 @@ export class GovernedGateway {
       sendJson(res, 404, { error: "not found" });
     });
   }
+}
+
+export function createSeededGateway(options: GatewayOptions = {}): GovernedGateway {
+  const gateway = new GovernedGateway({
+    spendPlaneUrl: process.env.SPEND_PLANE_URL,
+    ...options,
+  });
+  gateway.seedDemo();
+  return gateway;
 }

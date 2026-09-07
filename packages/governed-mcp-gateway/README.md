@@ -73,12 +73,39 @@ curl -sS -H "Authorization: Bearer mcp_human_controller_demo" \
   http://127.0.0.1:7474/v1/credentials/github_token/rotate
 ```
 
+## Glama remote connector
+
+Hosted HTTPS is **stateless Streamable HTTP** (CodeSentinel Fluid Compute shape, Cubiczan brand). Glama health-checks `https://$VERCEL_URL/mcp` with Bearer auth. Do not hardcode a Vercel hostname.
+
+Import this repository as a Vercel project:
+
+| Setting | Value |
+|---|---|
+| Root Directory | `.` (repo root: `vercel.json` + `api/index.mjs`) |
+| Framework Preset | Other |
+| Fluid Compute | enabled |
+| Env | `GATEWAY_AGENT_KEY`, `GATEWAY_HUMAN_KEY`, `GATEWAY_RESEARCH_KEY` (rotate demo keys for a public URL) |
+
+`vercel.json` rewrites `/mcp`, `/health`, and `/healthz` to `/api`. The Fluid `fetch` handler calls `handleWebRequest`. Local `:7474` uses the same handler for those paths. `GET /mcp/sse` stays on the Node listener only.
+
+Local smoke:
+
+```bash
+npm run mcp:http:smoke
+curl -sS http://127.0.0.1:7474/health
+curl -sS -H "Authorization: Bearer mcp_agt_payops_demo" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+  http://127.0.0.1:7474/mcp
+```
+
 ## API
 
 | Method | Path | Auth | What |
 |---|---|---|---|
-| `GET` | `/health` | — | `{ ok, service }` |
-| `POST` | `/mcp` | Bearer agent or human | JSON-RPC `initialize`, `tools/list`, `tools/call` |
+| `GET` | `/health` `/healthz` | — | `{ ok, service, transport, mode }` |
+| `POST` | `/mcp` | Bearer agent or human | Streamable HTTP JSON-RPC `initialize`, `tools/list`, `tools/call` |
 | `GET` | `/mcp/sse` | Bearer | `notifications/message` with principal on `_meta` |
 | `GET` | `/v1/context/tax` | Bearer | Schema token-tax ledger / estate report |
 | `GET` | `/v1/context/packs` | Bearer | Named packs and per-server cost |
@@ -146,9 +173,11 @@ curl -sS -H "Authorization: Bearer mcp_human_controller_demo" \
 
 ```
 packages/governed-mcp-gateway/src/gateway.ts       HTTP + JSON-RPC + SSE + vault
+packages/governed-mcp-gateway/src/web.ts           seeded handleWebRequest (Vercel / tests)
 packages/governed-mcp-gateway/src/token-tax.ts     bytes→token heuristic + report types
 packages/governed-mcp-gateway/src/tool-catalog.ts  packs + oversized fixture expansion
 packages/governed-mcp-gateway/src/context-pack.ts  session packs, allow-by-need
+api/index.mjs + vercel.json                        Fluid Compute Streamable HTTP remote
 packages/shared                                    CHP gate, HMAC ledger, SSE helper
 ```
 

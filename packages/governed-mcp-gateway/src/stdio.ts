@@ -8,7 +8,7 @@
  * Do not write logs to stdout — stdout is the protocol.
  */
 import type { Json } from "@cubiczan/shared";
-import { GovernedGateway } from "./gateway.ts";
+import { createSeededGateway, type GovernedGateway } from "./gateway.ts";
 
 export function writeMcpMessage(stream: NodeJS.WritableStream, message: unknown): void {
   stream.write(`${JSON.stringify(message)}\n`);
@@ -36,11 +36,7 @@ export function tryReadMcpMessage(buffer: Buffer): { value: Record<string, Json>
 }
 
 export function seededGateway(): GovernedGateway {
-  const gateway = new GovernedGateway({
-    spendPlaneUrl: process.env.SPEND_PLANE_URL,
-  });
-  gateway.seedDemo();
-  return gateway;
+  return createSeededGateway();
 }
 
 export async function serveStdio(

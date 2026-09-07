@@ -10,7 +10,8 @@ Repo files this listing needs:
 |---|---|
 | [`glama.json`](../glama.json) | Claim file. Schema is only `maintainers` (GitHub usernames). Pattern matches Cubiczan/chp-mcp (`icohangar-ops`) plus `Cubiczan`. |
 | [`Dockerfile`](../Dockerfile) | Local/self-host image. Glama often **generates** its own image; still keep this file so admin can paste CMD/build steps. |
-| `packages/governed-mcp-gateway/src/mcp.ts` | Stdio JSON-RPC entry. Glama wraps CMD with `mcp-proxy --`. HTTP `:7474` is **not** the Glama path. |
+| `packages/governed-mcp-gateway/src/mcp.ts` | Stdio JSON-RPC entry. Glama wraps CMD with `mcp-proxy --`. |
+| `api/index.mjs` + `vercel.json` | Optional **remote connector** (stateless Streamable HTTP on Vercel Fluid Compute). Glama health-checks `https://$VERCEL_URL/mcp` with Bearer auth. Not a substitute for the stdio Dockerfile build. |
 | `packages/governed-mcp-gateway/package.json` | `repository` is `https://github.com/Cubiczan/governed-mcp-gateway`. |
 
 Cubiczan-only URLs. Do not use icohangar-ops GitHub URLs on this listing.
@@ -68,4 +69,4 @@ npm ci
 node --import tsx packages/governed-mcp-gateway/src/mcp.ts
 ```
 
-Stdio stdout is **NDJSON** (`JSON.stringify(message)` plus a newline). Glama `mcp-proxy@6.4.3` parses newline-delimited JSON and **ignores** `Content-Length` header lines, which previously caused initialize timeouts. Stdin still accepts both NDJSON and legacy Content-Length framing. `npm start` / `npm run gateway` still serve HTTP `:7474`.
+Stdio stdout is **NDJSON** (`JSON.stringify(message)` plus a newline). Glama `mcp-proxy@6.4.3` parses newline-delimited JSON and **ignores** `Content-Length` header lines, which previously caused initialize timeouts. Stdin still accepts both NDJSON and legacy Content-Length framing. `npm start` / `npm run gateway` still serve HTTP `:7474`. `npm run mcp:http:smoke` curls `/health` then Bearer `initialize`. For a Glama **remote** connector after a Vercel import, use `https://$VERCEL_URL/mcp` and `Authorization: Bearer $GATEWAY_AGENT_KEY`. Never commit a deployment hostname.

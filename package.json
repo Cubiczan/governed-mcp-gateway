@@ -13,9 +13,13 @@
     "test": "npm test --workspaces --if-present",
     "gateway": "npm start -w @cubiczan/governed-mcp-gateway",
     "mcp": "npm run mcp -w @cubiczan/governed-mcp-gateway",
+    "mcp:http:smoke": "node --import tsx scripts/mcp-http-smoke.ts",
     "spend": "npm start -w @cubiczan/spend-mandate-plane",
     "cfo": "npm start -w @cubiczan/cfo-agent-mesh",
     "shots": "node --import tsx scripts/capture-live.ts && python3 scripts/render-readme-shots.py"
+  },
+  "dependencies": {
+    "tsx": "^4.19.3"
   },
   "repository": {
     "type": "git",

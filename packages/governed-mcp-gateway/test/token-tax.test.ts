@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   BYTES_PER_TOKEN,
   DEFAULT_TAX_THRESHOLDS,
@@ -12,10 +15,12 @@ import {
   packTax,
 } from "../src/token-tax.ts";
 import {
+  OVERSIZED_SCHEMA_RECIPE,
   buildOversizedCatalogTool,
   builtInCatalog,
   loadOversizedFixtureRecipe,
   toListedTool,
+  type OversizedFixtureRecipe,
 } from "../src/tool-catalog.ts";
 
 test("bytes-to-token heuristic is ceil(utf8/4)", () => {
@@ -33,6 +38,17 @@ test("measureJson matches JSON.stringify byte length", () => {
   const measured = measureJson(value);
   assert.equal(measured.bytes, Buffer.byteLength(JSON.stringify(value), "utf8"));
   assert.equal(measured.tokens, Math.ceil(measured.bytes / 4));
+});
+
+test("on-disk oversized fixture matches the in-source recipe", () => {
+  const onDisk = JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "fixtures/oversized-schema.json"),
+      "utf8",
+    ),
+  ) as OversizedFixtureRecipe;
+  assert.deepEqual(onDisk, OVERSIZED_SCHEMA_RECIPE);
+  assert.deepEqual(loadOversizedFixtureRecipe(), OVERSIZED_SCHEMA_RECIPE);
 });
 
 test("synthetic oversized fixture is flagged and dwarfs core tools", () => {

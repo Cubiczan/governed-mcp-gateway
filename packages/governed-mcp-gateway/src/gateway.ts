@@ -32,6 +32,11 @@ import {
   type ToolTax,
 } from "./token-tax.ts";
 import {
+  defaultClaimAllowlist,
+  toolsForScopes,
+  type ClaimAllowlistSeed,
+} from "./claim-allowlist.ts";
+import {
   builtInCatalog,
   canExpose,
   toListedTool,
@@ -60,6 +65,7 @@ export interface GatewayOptions {
   spendPlaneUrl?: string;
   auditKey?: string;
   taxThresholds?: Partial<TaxThresholds>;
+  claimFixture?: ClaimAllowlistSeed;
 }
 
 export interface JsonRpcError {
@@ -185,11 +191,13 @@ export class GovernedGateway {
   readonly tools = new Map<string, ToolImpl>();
   readonly packs = new ContextPackStore();
   readonly thresholds: TaxThresholds;
+  readonly claims: ClaimAllowlistSeed;
   private seq = 0;
 
   constructor(private readonly options: GatewayOptions = {}) {
     this.ledger = new AuditLedger(options.auditKey ?? "gateway-demo-key");
     this.thresholds = { ...DEFAULT_TAX_THRESHOLDS, ...options.taxThresholds };
+    this.claims = options.claimFixture ?? defaultClaimAllowlist();
     for (const def of builtInCatalog()) this.catalog.set(def.name, def);
 
     this.tools.set("echo.ping", (args, principal) => ({
@@ -225,6 +233,7 @@ export class GovernedGateway {
     const humanKey = process.env.GATEWAY_HUMAN_KEY ?? "mcp_human_controller_demo";
     const researchKey = process.env.GATEWAY_RESEARCH_KEY ?? "mcp_agt_research_demo";
 
+    const map = this.claims.mappings;
     this.registerAgent(
       {
         id: "agt_payops",
@@ -233,7 +242,7 @@ export class GovernedGateway {
         displayName: "PayOps Runner",
       },
       agentKey,
-      ["echo.ping", "stripe.charge"],
+      toolsForScopes(["tools:echo", "tools:payments"], map),
       50_000,
       5_000,
     );
@@ -245,7 +254,7 @@ export class GovernedGateway {
         displayName: "Research Scout",
       },
       researchKey,
-      ["echo.ping", "search.web"],
+      toolsForScopes(["tools:echo", "tools:search"], map),
       10_000,
       1_000,
     );
@@ -257,7 +266,7 @@ export class GovernedGateway {
         displayName: "Controller",
       },
       humanKey,
-      ["echo.ping"],
+      toolsForScopes(["tools:echo"], map),
       0,
       0,
     );

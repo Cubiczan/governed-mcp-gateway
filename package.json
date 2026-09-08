@@ -10,6 +10,8 @@
     "packages/cfo-agent-mesh"
   ],
   "scripts": {
+    "build": "node scripts/build-vercel.mjs",
+    "build:vercel": "node scripts/build-vercel.mjs",
     "test": "npm test --workspaces --if-present",
     "gateway": "npm start -w @cubiczan/governed-mcp-gateway",
     "mcp": "npm run mcp -w @cubiczan/governed-mcp-gateway",
@@ -19,6 +21,7 @@
     "shots": "node --import tsx scripts/capture-live.ts && python3 scripts/render-readme-shots.py"
   },
   "dependencies": {
+    "esbuild": "^0.25.9",
     "tsx": "^4.19.3"
   },
   "repository": {

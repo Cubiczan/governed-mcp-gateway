@@ -21,7 +21,15 @@ export {
 } from "./token-tax.ts";
 export {
   META_TOOLS,
+  OVERSIZED_SCHEMA_RECIPE,
   buildOversizedCatalogTool,
   builtInCatalog,
   loadOversizedFixtureRecipe,
 } from "./tool-catalog.ts";
+export {
+  DEFAULT_CLAIM_ALLOWLIST,
+  defaultClaimAllowlist,
+  effectiveAllowlist,
+  loadClaimAllowlistFixture,
+  toolsForScopes,
+} from "./claim-allowlist.ts";

@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Json, Principal } from "@cubiczan/shared";
 import { listedToolShape, measureToolSchema, type ToolTax, type TaxThresholds } from "./token-tax.ts";
 
@@ -28,7 +25,8 @@ export interface OversizedFixtureRecipe {
   };
 }
 
-const FALLBACK_OVERSIZED_RECIPE: OversizedFixtureRecipe = {
+/** In-source recipe. Do not read `test/fixtures/oversized-schema.json` at runtime (Fluid cwd has no test tree). */
+export const OVERSIZED_SCHEMA_RECIPE: OversizedFixtureRecipe = {
   name: "docs.mega_schema",
   description:
     "Synthetic oversized MCP tool schema. Inspiration: measured tools/list cost can vary ~1700x across servers; this fixture makes that tax visible.",
@@ -42,13 +40,7 @@ const FALLBACK_OVERSIZED_RECIPE: OversizedFixtureRecipe = {
 };
 
 export function loadOversizedFixtureRecipe(): OversizedFixtureRecipe {
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const path = join(here, "../test/fixtures/oversized-schema.json");
-    return JSON.parse(readFileSync(path, "utf8")) as OversizedFixtureRecipe;
-  } catch {
-    return FALLBACK_OVERSIZED_RECIPE;
-  }
+  return structuredClone(OVERSIZED_SCHEMA_RECIPE);
 }
 
 export function expandOversizedInputSchema(recipe: OversizedFixtureRecipe): Json {

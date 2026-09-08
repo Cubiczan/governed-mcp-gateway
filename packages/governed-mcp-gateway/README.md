@@ -84,9 +84,11 @@ Import this repository as a Vercel project:
 | Root Directory | `.` (repo root: `vercel.json` + `api/index.mjs`) |
 | Framework Preset | Other |
 | Fluid Compute | enabled |
+| Install Command | `npm ci && npm run build` (set in `vercel.json`) |
+| Build Command | empty (`buildCommand` is null) |
 | Env | `GATEWAY_AGENT_KEY`, `GATEWAY_HUMAN_KEY`, `GATEWAY_RESEARCH_KEY` (rotate demo keys for a public URL) |
 
-`vercel.json` rewrites `/mcp`, `/health`, and `/healthz` to `/api`. The Fluid `fetch` handler calls `handleWebRequest`. Local `:7474` uses the same handler for those paths. `GET /mcp/sse` stays on the Node listener only.
+`npm run build` emits `dist/web.mjs`. The Fluid `fetch` handler imports that compiled JS and calls `handleWebRequest`. Do not run TypeScript through runtime `tsx` on Vercel. `vercel.json` rewrites `/mcp`, `/health`, and `/healthz` to `/api`. Local `:7474` uses the same handler for those paths. `GET /mcp/sse` stays on the Node listener only.
 
 Local smoke:
 
@@ -177,6 +179,7 @@ packages/governed-mcp-gateway/src/web.ts           seeded handleWebRequest (Verc
 packages/governed-mcp-gateway/src/token-tax.ts     bytes→token heuristic + report types
 packages/governed-mcp-gateway/src/tool-catalog.ts  packs + oversized fixture expansion
 packages/governed-mcp-gateway/src/context-pack.ts  session packs, allow-by-need
+scripts/build-vercel.mjs + dist/web.mjs            compiled Fluid handler (no runtime tsx)
 api/index.mjs + vercel.json                        Fluid Compute Streamable HTTP remote
 packages/shared                                    CHP gate, HMAC ledger, SSE helper
 ```

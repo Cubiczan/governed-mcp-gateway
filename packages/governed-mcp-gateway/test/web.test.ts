@@ -176,7 +176,8 @@ test("vercel.json and api/index.mjs follow Fluid Compute shape without a hostnam
   assert.ok((vercel.rewrites ?? []).every((r) => r.destination === "/api"));
   assert.ok(vercel.functions && "api/index.mjs" in vercel.functions);
   assert.match(vercel.installCommand ?? "", /npm run build/);
-  assert.equal(vercel.buildCommand, null);
+  assert.match(vercel.buildCommand ?? "", /npm run build/);
+  assert.doesNotMatch(vercel.buildCommand ?? "", /\btsc\b/);
   assert.match(vercel.functions["api/index.mjs"]?.includeFiles ?? "", /dist\/\*\*/);
 
   const entry = readRepo("api/index.mjs");

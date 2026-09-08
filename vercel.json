@@ -3,7 +3,7 @@
   "framework": null,
   "fluid": true,
   "installCommand": "npm ci && npm run build",
-  "buildCommand": null,
+  "buildCommand": "npm run build",
   "rewrites": [
     { "source": "/mcp", "destination": "/api" },
     { "source": "/health", "destination": "/api" },

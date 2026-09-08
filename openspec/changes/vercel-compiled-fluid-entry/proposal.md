@@ -15,7 +15,7 @@ Require stack: /var/task/node_modules/tsx/dist/get-pipe-path-_tAJyU_v.mjs
 
 - Compile the Fluid handler to `dist/web.mjs` (esbuild bundle of the gateway + `@cubiczan/shared` graph).
 - `api/index.mjs` imports that compiled JS. No runtime `tsx`. No `.ts` imports on the Vercel path.
-- `vercel.json` runs `npm ci && npm run build` during install (trust-ledger-os-mcp shape) so `dist/` exists before the function is packed. `includeFiles` is `dist/**`.
+- `vercel.json` runs `npm ci && npm run build` on install and again as `buildCommand` (esbuild, not `tsc`) so `dist/` exists before the function is packed. `includeFiles` is `dist/**`.
 - Keep Streamable HTTP, `/mcp` `/health` `/healthz` rewrites, Bearer via `GATEWAY_AGENT_KEY`, Fluid `maxDuration` 60. Do not hardcode a Vercel hostname.
 
 ## Capabilities

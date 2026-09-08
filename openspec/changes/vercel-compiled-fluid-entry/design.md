@@ -12,7 +12,7 @@
 
 2. **trust-ledger-os-mcp / CodeSentinel runtime shape.** `api/index.mjs` is a thin Fluid `{ fetch }` wrapper that statically imports compiled JS (`../dist/web.mjs`). CodeSentinel imports a `.js` handler; trust-ledger-os-mcp imports `../dist/web-handler.js`. Same contract: the lambda never loads TypeScript.
 
-3. **Build during Vercel install.** `installCommand` is `npm ci && npm run build`. `buildCommand` is null so the platform does not run a second, TypeScript-inferred compile. `includeFiles` is `dist/**` (not `packages/**`). `dist/` stays gitignored; it is produced on the builder.
+3. **Build with esbuild, not tsc.** `installCommand` is `npm ci && npm run build`. `buildCommand` is `npm run build` so a dashboard leftover `tsc` (TS5097 on `.ts` imports) is overridden. `includeFiles` is `dist/**` (not `packages/**`). `dist/` stays gitignored; it is produced on the builder.
 
 4. **Local workflow unchanged.** `npm start` / `npm test` in packages still use `node --import tsx` on `.ts` sources. Gateway tests call the build script before importing `api/index.mjs`.
 

@@ -86,9 +86,9 @@ Glama can health-check a **stateless Streamable HTTP** remote at `https://$VERCE
 | Fluid Compute | On (`"fluid": true`) |
 | Node.js | 20 or later |
 | Install Command | `npm ci && npm run build` (`vercel.json` already sets this) |
-| Build Command | empty / none (`buildCommand` is null; `dist/` is produced during install) |
+| Build Command | `npm run build` (esbuild → `dist/web.mjs`; do **not** run `tsc`) |
 
-`npm run build` runs `scripts/build-vercel.mjs` (esbuild). That emits `dist/web.mjs`. `api/index.mjs` imports that compiled file — it does **not** load TypeScript via runtime `tsx`. Dashboard overrides are not required if `vercel.json` is honored.
+`npm run build` runs `scripts/build-vercel.mjs` (esbuild). That emits `dist/web.mjs`. `api/index.mjs` imports that compiled file — it does **not** load TypeScript via runtime `tsx`. If the Vercel dashboard still has a Build Command of `tsc`, clear it or set it to `npm run build` so TS5097 does not come back. Dashboard overrides are not required if `vercel.json` is honored.
 
 **Environment variables** (Vercel Project → Settings → Environment Variables). Rotate the demo values before a public URL:
 

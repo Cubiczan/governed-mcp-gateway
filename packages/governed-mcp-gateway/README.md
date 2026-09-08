@@ -85,7 +85,7 @@ Import this repository as a Vercel project:
 | Framework Preset | Other |
 | Fluid Compute | enabled |
 | Install Command | `npm ci && npm run build` (set in `vercel.json`) |
-| Build Command | empty (`buildCommand` is null) |
+| Build Command | `npm run build` (esbuild; do not use `tsc`) |
 | Env | `GATEWAY_AGENT_KEY`, `GATEWAY_HUMAN_KEY`, `GATEWAY_RESEARCH_KEY` (rotate demo keys for a public URL) |
 
 `npm run build` emits `dist/web.mjs`. The Fluid `fetch` handler imports that compiled JS and calls `handleWebRequest`. Do not run TypeScript through runtime `tsx` on Vercel. `vercel.json` rewrites `/mcp`, `/health`, and `/healthz` to `/api`. Local `:7474` uses the same handler for those paths. `GET /mcp/sse` stays on the Node listener only.

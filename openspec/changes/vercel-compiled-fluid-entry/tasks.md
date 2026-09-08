@@ -9,7 +9,7 @@
 ## 2. Vercel Fluid entry
 
 - [x] 2.1 `api/index.mjs` imports `../dist/web.mjs` (no `tsx`, no `.ts`)
-- [x] 2.2 `vercel.json` installCommand builds, includeFiles `dist/**`, keep rewrites + fluid + maxDuration 60
+- [x] 2.2 `vercel.json` install + build run `npm run build`, includeFiles `dist/**`, keep rewrites + fluid + maxDuration 60
 
 ## 3. Proof and docs
 

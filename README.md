@@ -70,7 +70,7 @@ curl -sS -H "Authorization: Bearer mcp_agt_payops_demo" \
 | `GET` | `/mcp/sse?once=1` | Local SSE notification with `_meta.cubiczan.principal` (not the Vercel path) |
 | `GET` | `/v1/context/tax` | Schema token-tax estate + session report |
 | `POST` | `/v1/context/need` | Admit allowlisted tools into the session pack |
-| `POST` | `/v1/credentials/:name/rotate` | Human-only vault rotate; old hash dies |
+| `POST` | `/v1/credentials/:name/rotate` | Human-only vault rotate; old hash dies; JSON is redacted (no `secret`) |
 | `POST` | `/v1/credentials/verify` | Check a secret against the current hash |
 
 ### Glama remote connector

@@ -114,7 +114,7 @@ curl -sS -H "Authorization: Bearer mcp_agt_payops_demo" \
 | `GET` | `/v1/context/packs` | Bearer | Named packs and per-server cost |
 | `POST` | `/v1/context/need` | Bearer | Admit allowlisted tools or a pack into the session |
 | `POST` | `/v1/credentials` | Human | Put a named secret |
-| `POST` | `/v1/credentials/:name/rotate` | Human | New hash, same name, version++ |
+| `POST` | `/v1/credentials/:name/rotate` | Human | New hash, same name, version++; response is redacted (`name`/`hash`/`preview`, no `secret`) |
 | `POST` | `/v1/credentials/verify` | — | `{ ok: boolean }` |
 | `POST` | `/v1/locks` | Human | CHP approve / reject |
 

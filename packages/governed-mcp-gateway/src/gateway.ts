@@ -49,7 +49,6 @@ export interface Credential {
   version: number;
   hash: string;
   preview: string;
-  secret?: string;
 }
 
 export interface AgentRecord {
@@ -117,6 +116,16 @@ function hash(value: string): string {
 
 function preview(value: string): string {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+/** Vault HTTP JSON: name + hash/preview only. Never attach plaintext `secret`. */
+function publicCredential(cred: Credential): Credential {
+  return {
+    name: cred.name,
+    version: cred.version,
+    hash: cred.hash,
+    preview: cred.preview,
+  };
 }
 
 function asObject(value: Json | undefined): Record<string, Json> {
@@ -300,7 +309,6 @@ export class GovernedGateway {
       version: (existing?.version ?? 0) + 1,
       hash: hash(secret),
       preview: preview(secret),
-      secret,
     };
     this.credentials.set(name, cred);
     this.ledger.append({
@@ -309,7 +317,7 @@ export class GovernedGateway {
       inputs: { name, version: cred.version },
       sources: ["vault"],
     });
-    return { ...cred, secret: undefined };
+    return publicCredential(cred);
   }
 
   rotateCredential(name: string, nextSecret: string): Credential {
@@ -859,7 +867,7 @@ export class GovernedGateway {
           sendJson(res, 400, { error: "name and secret required" });
           return;
         }
-        sendJson(res, 200, this.putCredential(name, secret));
+        sendJson(res, 200, publicCredential(this.putCredential(name, secret)));
         return;
       }
 
@@ -872,7 +880,7 @@ export class GovernedGateway {
         const name = url.pathname.split("/")[3];
         const secret = String(obj.secret ?? newId("tok"));
         try {
-          sendJson(res, 200, { ...this.rotateCredential(name, secret), secret });
+          sendJson(res, 200, publicCredential(this.rotateCredential(name, secret)));
         } catch (error) {
           sendJson(res, 404, { error: error instanceof Error ? error.message : String(error) });
         }

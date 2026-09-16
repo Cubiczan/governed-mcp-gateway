@@ -66,6 +66,12 @@ test("SSE event repeats principal", async () => {
   }
 });
 
+function assertNoPlaintextSecret(raw: string, body: Record<string, unknown>, plaintext: string) {
+  assert.equal(Object.hasOwn(body, "secret"), false);
+  assert.doesNotMatch(raw, /"secret"\s*:/);
+  assert.doesNotMatch(raw, new RegExp(plaintext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+}
+
 test("rotate named MCP input invalidates the old secret", async () => {
   const { server, base, keys, gateway } = await start();
   try {
@@ -78,12 +84,62 @@ test("rotate named MCP input invalidates the old secret", async () => {
       },
       body: JSON.stringify({ secret: "ghp_new_secret_bbbb" }),
     });
-    const body = await rotate.json();
+    const raw = await rotate.text();
+    const body = JSON.parse(raw) as Record<string, unknown>;
     assert.equal(rotate.status, 200);
     assert.equal(body.name, "github_token");
     assert.equal(body.version, 2);
+    assert.equal(typeof body.hash, "string");
+    assert.equal(typeof body.preview, "string");
+    assertNoPlaintextSecret(raw, body, "ghp_new_secret_bbbb");
     assert.equal(gateway.verifyCredential("github_token", "ghp_old_secret_aaaa"), false);
     assert.equal(gateway.verifyCredential("github_token", "ghp_new_secret_bbbb"), true);
+  } finally {
+    server.close();
+  }
+});
+
+test("rotate JSON never includes a secret field", async () => {
+  const { server, base, keys, gateway } = await start();
+  try {
+    const rotate = await fetch(`${base}/v1/credentials/github_token/rotate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${keys.humanKey}`,
+      },
+      body: JSON.stringify({ secret: "ghp_rotated_plain_cccc" }),
+    });
+    const raw = await rotate.text();
+    const body = JSON.parse(raw) as Record<string, unknown>;
+    assert.equal(rotate.status, 200);
+    assert.deepEqual(Object.keys(body).sort(), ["hash", "name", "preview", "version"]);
+    assertNoPlaintextSecret(raw, body, "ghp_rotated_plain_cccc");
+    assert.equal(gateway.verifyCredential("github_token", "ghp_old_secret_aaaa"), false);
+    assert.equal(gateway.verifyCredential("github_token", "ghp_rotated_plain_cccc"), true);
+  } finally {
+    server.close();
+  }
+});
+
+test("rotate without a supplied secret still omits secret from JSON", async () => {
+  const { server, base, keys, gateway } = await start();
+  try {
+    const rotate = await fetch(`${base}/v1/credentials/github_token/rotate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${keys.humanKey}`,
+      },
+      body: JSON.stringify({}),
+    });
+    const raw = await rotate.text();
+    const body = JSON.parse(raw) as Record<string, unknown>;
+    assert.equal(rotate.status, 200);
+    assert.equal(body.name, "github_token");
+    assert.equal(Object.hasOwn(body, "secret"), false);
+    assert.doesNotMatch(raw, /"secret"\s*:/);
+    assert.equal(gateway.verifyCredential("github_token", "ghp_old_secret_aaaa"), false);
   } finally {
     server.close();
   }
